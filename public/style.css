@@ -77,3 +77,5 @@ input[type=checkbox]{width:19px;height:19px;accent-color:#1c1c1c;flex:none}
  #orders-list{max-height:66vh}
  .stage{min-height:250px}
 }
+
+.login-policy{margin-top:22px!important;font-size:12px}.login-policy a{color:#777;text-underline-offset:3px}footer a{color:#8b8e97;text-decoration:underline;text-underline-offset:3px}footer .wrap{gap:12px;flex-wrap:wrap}
