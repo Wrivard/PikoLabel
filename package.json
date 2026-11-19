@@ -1,0 +1,13 @@
+{
+  "name": "piko-label-printer",
+  "version": "2.0.0",
+  "private": true,
+  "description": "Vercel-ready Piko Cards order labels and packing slips",
+  "type": "module",
+  "engines": { "node": ">=20" },
+  "scripts": {
+    "dev": "node local.mjs",
+    "start": "node local.mjs",
+    "test": "node --test"
+  }
+}
