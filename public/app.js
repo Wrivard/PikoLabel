@@ -3,10 +3,12 @@ async function call(path,options={}){const r=await fetch("/api/"+path,{credentia
 const addr=(name,a)=>[name,a?.line1,a?.line2,a?.cityStatePostal,a?.country].filter(Boolean).map(esc).join("<br>");
 async function initialize(){try{state.auth=await call("bootstrap");$("login").classList.toggle("hidden",state.auth.authenticated);$("app").classList.toggle("hidden",!state.auth.authenticated);if(!state.auth.authenticated)return;const stored=JSON.parse(localStorage.getItem("piko-settings")||"{}");state.settings={...state.auth.settings,...stored};
   // Upgrade the old default 4 x 2 layout; preserve other previously customized sizes.
-  if(!stored.labelProfile&&Number(state.settings.labelWidth)===4&&Number(state.settings.labelHeight)===2){
-    Object.assign(state.settings,{labelHeight:1.25,labelGap:.12,labelMargin:.06,labelFont:8,labelProfile:"word"});
+  if(!stored.labelProfile && Number(state.settings.labelWidth)===4 && Number(state.settings.labelHeight)===2){
+    Object.assign(state.settings,{labelWidth:2.25,labelHeight:1.25,labelGap:0,labelMargin:.14,labelFont:10,labelBorder:false,labelProfile:"word"});
+  } else if(stored.labelProfile==="word" && Number(stored.labelWidth)===4){
+    Object.assign(state.settings,{labelWidth:2.25,labelHeight:1.25,labelGap:0,labelMargin:.14,labelFont:10,labelBorder:false,labelProfile:"word"});
   }try{state.docs={packing:true,labels:true,...JSON.parse(localStorage.getItem("piko-doc-choices")||"{}")}}catch{};$("include-packing").checked=state.docs.packing;$("include-labels").checked=state.docs.labels;populate();await reload()}catch(e){toast(e.message)}}
-function populate(){const s=state.settings,a=s.returnAddress||{};for(const [id,v] of Object.entries({storeName:s.storeName,returnName:s.returnName,line1:a.line1,line2:a.line2,cityStatePostal:a.cityStatePostal,country:a.country,thanks:s.thankYouMessage,width:s.labelWidth,height:s.labelHeight,font:s.labelFont,gap:s.labelGap}))$(id).value=v??"";$("border").checked=s.labelBorder!==false;$("labelPreset").value=s.labelProfile||((Number(s.labelWidth)===4&&Number(s.labelHeight)===1.25)?"word":"custom");$("connect").innerHTML=state.auth.connected?'<button id="disconnect" class="ghost">Disconnect eBay</button>':state.auth.ebayConfigured?'<a href="/api/oauth/start">Connect eBay →</a>':'<p>To connect real orders, add EBAY_CLIENT_ID, EBAY_CLIENT_SECRET, EBAY_RUNAME, APP_PASSWORD and APP_SECRET in Vercel settings.</p>';if($("disconnect"))$("disconnect").onclick=async()=>{await call("disconnect",{method:"POST"});location.reload()}}
+function populate(){const s=state.settings,a=s.returnAddress||{};for(const [id,v] of Object.entries({storeName:s.storeName,returnName:s.returnName,line1:a.line1,line2:a.line2,cityStatePostal:a.cityStatePostal,country:a.country,thanks:s.thankYouMessage,width:s.labelWidth,height:s.labelHeight,font:s.labelFont,gap:s.labelGap}))$(id).value=v??"";$("border").checked=s.labelBorder!==false;$("labelPreset").value=s.labelProfile||((Number(s.labelWidth)===2.25&&Number(s.labelHeight)===1.25)?"word":"custom");$("connect").innerHTML=state.auth.connected?'<button id="disconnect" class="ghost">Disconnect eBay</button>':state.auth.ebayConfigured?'<a href="/api/oauth/start">Connect eBay →</a>':'<p>To connect real orders, add EBAY_CLIENT_ID, EBAY_CLIENT_SECRET, EBAY_RUNAME, APP_PASSWORD and APP_SECRET in Vercel settings.</p>';if($("disconnect"))$("disconnect").onclick=async()=>{await call("disconnect",{method:"POST"});location.reload()}}
 async function reload(){try{let result=await call("orders");state.orders=result.orders;state.demo=result.demo;$("status").textContent=result.demo?"Demo mode":"eBay connected";$("status").className="pill "+(result.demo?"":"live");state.selected=new Set([...state.selected].filter(id=>state.orders.some(o=>o.id===id)));render()}catch(e){toast(e.message)}}
 const filtered=()=>state.orders.filter(o=>JSON.stringify(o).toLowerCase().includes($("search").value.toLowerCase()));
 function render(){const list=filtered();$("count").textContent=state.orders.length;$("selected-count").textContent=state.selected.size+" selected";$("all").checked=!!list.length&&list.every(o=>state.selected.has(o.id));$("orders-list").innerHTML=list.length?list.map(o=>'<div class="order '+(state.selected.has(o.id)?"selected":"")+'" data-id="'+esc(o.id)+'"><input type="checkbox" '+(state.selected.has(o.id)?"checked":"")+'><div class="order-data"><div class="order-top"><b>'+esc(o.shipTo?.name||o.buyer)+'</b><span>'+esc((o.createdAt||"").slice(0,10))+'</span></div><div class="meta">#'+esc(o.displayId||o.id)+' · '+qty(o)+' cards · '+money(o.total)+'</div><div class="desc">'+esc((o.items||[]).map(i=>i.title).join(" · "))+'</div></div></div>').join(""):'<div class="foot">No orders to display.</div>';for(const el of document.querySelectorAll(".order"))el.onclick=()=>{const id=el.dataset.id;state.selected.has(id)?state.selected.delete(id):state.selected.add(id);render()};updatePrintControls();queuePreview()}
@@ -26,7 +28,7 @@ function queuePreview(){
  const seq=++state.previewSeq;
  const order=state.orders.find(x=>state.selected.has(x.id))||state.orders[0];
  $("view-label").classList.toggle("on",state.view==="label");$("view-slip").classList.toggle("on",state.view==="slip");
- $("label-desc").textContent=state.settings.labelWidth+" × "+state.settings.labelHeight+" in · MUNBYN";
+ $("label-desc").textContent=state.settings.labelWidth+" × "+state.settings.labelHeight+" in · 2 labels/order · MUNBYN";
  if(!order){$("preview-doc").replaceChildren();$("preview-status").textContent="Select an order to see its exact printable PDF.";$("preview-note").textContent="";return}
  $("preview-status").textContent="Generating actual PDF preview…";
  $("preview-note").textContent="Order #"+(order.displayId||order.id)+" · "+(state.view==="label"?"Thermal label":"US Letter packing slip")+(state.selected.size>1?" · first selected order":"");
@@ -43,7 +45,7 @@ async function renderPdfPreview(order,seq){
   const old=state.previewUrl;state.previewUrl=url;
   const title=state.view==="label"?"Actual label PDF":"Actual packing slip PDF";
   const frame=document.createElement("iframe");frame.className="pdf-iframe";frame.title=title;frame.loading="eager";frame.src=url+"#toolbar=0&navpanes=0&view=Fit";
-  const wrapper=document.createElement("div");wrapper.className="pdf-sheet "+(state.view==="label"?"pdf-thermal":"pdf-letter");if(state.view==="label")wrapper.style.aspectRatio=String(Number(state.settings.labelWidth)||4)+"/"+String(Number(state.settings.labelHeight)||1.25);wrapper.appendChild(frame);
+  const wrapper=document.createElement("div");wrapper.className="pdf-sheet "+(state.view==="label"?"pdf-thermal":"pdf-letter");if(state.view==="label")wrapper.style.aspectRatio=String(Number(state.settings.labelWidth)||2.25)+"/"+String(Number(state.settings.labelHeight)||1.25);wrapper.appendChild(frame);
   const open=document.createElement("a");open.className="preview-open";open.href=url;open.target="_blank";open.rel="noopener";open.textContent="Open full PDF preview ↗";
   $("preview-doc").replaceChildren(wrapper,open);
   $("preview-status").textContent=state.demo?"Exact PDF preview · Demo order":"Exact PDF preview · eBay order";
@@ -83,14 +85,14 @@ $("print").onclick=async()=>{
 };
 function testPrinter(type){
   const isLabel=type==="label";
-  const w=Math.min(4.3,Math.max(2.2,Number(state.settings.labelWidth)||4));
-  const h=Math.min(6.2,Math.max(1.25,Number(state.settings.labelHeight)||2));
+  const w=Math.min(4.3,Math.max(2.2,Number(state.settings.labelWidth)||2.25));
+  const h=Math.min(6.2,Math.max(1.25,Number(state.settings.labelHeight)||1.25));
   const format=isLabel?`${w}in ${h}in`:"letter";
   const title=isLabel?"THERMAL ADDRESS LABEL TEST":"PACKING SLIP PRINTER TEST";
-  const sample=isLabel?"<div class=\"cells\"><section><b>SHIP FROM</b><p>Piko Cards<br>Sample return address<br>Canada</p></section><section><b>SHIP TO</b><p>Example customer<br>123 Sample Street<br>Canada</p></section></div>":"<h1>PIKO CARDS</h1><p>Printer test · US Letter · 8.5 × 11 in</p><hr><p>This is a sample packing slip, not an actual order.</p>";
+  const sample=isLabel?"<div class=\"sheet-label\"><b>Ship from</b><p>Piko Cards<br>Sample return address<br>Canada</p></div><div class=\"sheet-label\"><b>Ship to</b><p>Example customer<br>123 Sample Street<br>Canada</p></div>":"<h1>PIKO CARDS</h1><p>Printer test · US Letter · 8.5 × 11 in</p><hr><p>This is a sample packing slip, not an actual order.</p>";
   const pop=window.open("","_blank");
   if(!pop){toast("Allow pop-ups to open your print preview.");return}
-  const page=`<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>${title}</title><style>@page{size:${format};margin:${isLabel?".06in":".3in"}}body{font-family:Arial,sans-serif;color:#111;background:white;margin:0;padding:0}.sheet{box-sizing:border-box;width:100%;padding:${isLabel?".07in":".15in"}}h1{font-size:20pt}.sheet p{font-size:${isLabel?"8pt":"12pt"};line-height:1.4}.cells{display:grid;grid-template-columns:1fr 1fr;gap:.13in}.cells section+section{border-left:1px dashed #777;padding-left:.13in}.cells b{font-size:8pt}.tools{font:14px system-ui;background:#f4f4f4;padding:15px;margin:12px 0}.tools button{font:inherit;padding:9px 15px;cursor:pointer}@media print{.tools{display:none}}</style></head><body><div class="tools">This print preview lets Android show its installed printers. Printing only happens if you confirm. <button onclick="window.print()">Choose printer / Print</button></div><div class="sheet">${sample}</div></body></html>`;
+  const page=`<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>${title}</title><style>@page{size:${format};margin:${isLabel?".06in":".3in"}}body{font-family:Arial,sans-serif;color:#111;background:white;margin:0;padding:0}.sheet{box-sizing:border-box;width:100%;padding:${isLabel?".07in":".15in"}}h1{font-size:20pt}.sheet p{font-size:${isLabel?"8pt":"12pt"};line-height:1.4}.cells{display:grid;grid-template-columns:1fr 1fr;gap:.13in}.cells section+section{border-left:1px dashed #777;padding-left:.13in}.cells b{font-size:8pt}.sheet-label{break-after:page;page-break-after:always}.sheet-label b{font-size:10pt}.sheet-label p{font-size:10pt}.tools{font:14px system-ui;background:#f4f4f4;padding:15px;margin:12px 0}.tools button{font:inherit;padding:9px 15px;cursor:pointer}@media print{.tools{display:none}}</style></head><body><div class="tools">This print preview lets Android show its installed printers. Printing only happens if you confirm. <button onclick="window.print()">Choose printer / Print</button></div><div class="sheet">${sample}</div></body></html>`;
   pop.document.open();pop.document.write(page);pop.document.close();pop.focus();
   // Some Android browsers block automatic print dialogs; the visible button is a fallback.
   try{pop.print()}catch{}
@@ -98,8 +100,8 @@ function testPrinter(type){
 $("labelPreset").onchange=()=>{
  const preset=$("labelPreset").value;
  if(preset==="word"){
-  for(const [id,v] of Object.entries({width:4,height:1.25,font:8,gap:.12}))$(id).value=v;
-  Object.assign(state.settings,{labelWidth:4,labelHeight:1.25,labelFont:8,labelGap:.12,labelMargin:.06,labelProfile:"word"});
+  for(const [id,v] of Object.entries({width:2.25,height:1.25,font:10,gap:0}))$(id).value=v;
+  Object.assign(state.settings,{labelWidth:2.25,labelHeight:1.25,labelFont:10,labelGap:0,labelMargin:.14,labelBorder:false,labelProfile:"word"});
  }else if(preset==="standard"){
   for(const [id,v] of Object.entries({width:4,height:2,font:8.5,gap:.13}))$(id).value=v;
   Object.assign(state.settings,{labelWidth:4,labelHeight:2,labelFont:8.5,labelGap:.13,labelMargin:.12,labelProfile:"standard"});

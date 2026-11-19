@@ -85,3 +85,5 @@ input[type=checkbox]{width:19px;height:19px;accent-color:#1c1c1c;flex:none}
 .preset-row select{display:block;min-height:47px;width:100%;margin-top:8px;border:1px solid #e1e2e6;border-radius:9px;padding:10px 12px;background:white;font:inherit;font-size:14px;color:#1f2127}
 .calibration-button{width:100%;min-height:46px;margin:3px 0 8px}
 .pdf-sheet.pdf-thermal{aspect-ratio:4/1.25;max-width:500px}
+
+.pdf-sheet.pdf-thermal{aspect-ratio:2.25/1.25;max-width:360px}

@@ -65,28 +65,24 @@ function renderAddressBlock(lines,x,top,w,maxH,title,fontSize){
  return c;
 }
 export function labelsPdf(orders,settings){
- const w=(Number(settings.labelWidth)||4)*PT,h=(Number(settings.labelHeight)||2)*PT;
- const margin=Number(settings.labelMargin??.06)*PT,gap=Number(settings.labelGap??.12)*PT;
- if(w<2.2*PT||w>4.3*PT||h<1.25*PT||h>6.2*PT)throw new Error('Label size must be between 2.2-4.3 in wide and 1.25-6.2 in high.');
- // The tested Word template uses TWO WIDE, SEPARATE rectangles with whitespace
- // between them, not one tall 4x2 frame with a centre divider.
- const boxW=(w-2*margin-gap)/2;
- const boxH=h-2*margin;
- const leftX=margin,rightX=margin+boxW+gap;
- const inside=.08*PT;
+ const w=(Number(settings.labelWidth)||2.25)*PT,h=(Number(settings.labelHeight)||1.25)*PT;
+ if(w<2.2*PT||w>4.3*PT||h<1.25*PT||h>6.2*PT)throw new Error('Unsupported thermal label dimensions.');
+ const margin=.14*PT;
+ const innerW=w-2*margin;
  const sender=addressLines(settings.returnName,settings.returnAddress);
- const pages=orders.map(order=>{
-   let c='0 0 0 RG 0 0 0 rg\n';
-   if(settings.labelBorder!==false){
-     c+=rect(leftX,margin,boxW,boxH,.55);
-     c+=rect(rightX,margin,boxW,boxH,.55);
+ const pages=[];
+ for(const order of orders){
+   // Tested Word format: each physical 2.25 x 1.25 inch sheet is one page.
+   for(const [title,lines] of [['Ship from',sender],['Ship to',addressLines(order.shipTo?.name,order.shipTo)]]){
+     let commands='0 0 0 RG 0 0 0 rg\n';
+     if(settings.labelBorder===true)commands+=rect(3,3,w-6,h-6,.5);
+     commands+=renderAddressBlock(lines,margin,h-margin-8,innerW,h-2*margin,title,Number(settings.labelFont)||10);
+     pages.push({w,h,commands});
    }
-   const top=h-margin-inside-6,maxTextH=boxH-2*inside;
-   c+=renderAddressBlock(sender,leftX+inside,top,boxW-2*inside,maxTextH,'SHIP FROM',Number(settings.labelFont)||8);
-   c+=renderAddressBlock(addressLines(order.shipTo?.name,order.shipTo),rightX+inside,top,boxW-2*inside,maxTextH,'SHIP TO',Number(settings.labelFont)||8);
-   return {w,h,commands:c};
- });return createPdf(pages);
+ }
+ return createPdf(pages);
 }
+
 const money=(obj)=>{if(!obj||obj.value==null)return '';const n=Number(obj.value);return Number.isFinite(n)?`${n.toFixed(2)} ${obj.currency||'CAD'}`:'';};
 export function packingPdf(orders,settings){
  const w=8.5*PT,h=11*PT,m=43;
@@ -126,18 +122,17 @@ export function packingPdf(orders,settings){
  });return createPdf(pages);
 }
 
-/** Calibration sheet for matching custom thermal stock, measured at 100% print scale. */
+/** Exact-size PDF for testing each sheet in the MUNBYN. */
 export function calibrationPdf(settings){
- const width=Number(settings.labelWidth)||4,height=Number(settings.labelHeight)||1.25;
+ const width=Number(settings.labelWidth)||2.25,height=Number(settings.labelHeight)||1.25;
  const w=width*PT,h=height*PT;
  if(w<2.2*PT||w>4.3*PT||h<1.25*PT||h>6.2*PT)throw new Error('Unsupported label dimensions');
- const m=7,g=Math.max(0,Number(settings.labelGap??.12))*PT;
- const boxW=(w-2*m-g)/2;
+ const m=.13*PT;
  let c='0 0 0 RG 0 0 0 rg\n';
- c+=rect(m,m,boxW,h-2*m,.65)+rect(m+boxW+g,m,boxW,h-2*m,.65);
- c+=text(m+8,h-22,'SHIP FROM',7.3,true);
- c+=text(m+boxW+g+8,h-22,'SHIP TO',7.3,true);
- c+=text(m+8,h-34,width.toFixed(2)+' x '+height.toFixed(2)+' in',7);
- if(h>=85){const x=Math.max(8,w-86),y=18;c+=line(x,y,x+72,y,1.4);c+=line(x,y-3,x,y+3,.9);c+=line(x+72,y-3,x+72,y+3,.9);c+=text(x+12,y+6,'1 inch - measure',7);}
+ c+=rect(3,3,w-6,h-6,.6);
+ c+=text(m,h-22,'TEST: '+width.toFixed(2)+' x '+height.toFixed(2)+' in',8.2,true);
+ c+=text(m,h-38,'Print at 100% / actual size',7.2);
+ c+=line(m,16,m+72,16,1.3)+line(m,12,m,20,.8)+line(m+72,12,m+72,20,.8);
+ c+=text(m+20,23,'1 inch',7.2);
  return createPdf([{w,h,commands:c}]);
 }

@@ -28,7 +28,7 @@ jobs:
           node --input-type=module -e '
           import {labelsPdf, packingPdf, calibrationPdf} from "./pdf.mjs";
           const o={id:"test",displayId:"test",buyer:"buyer",shipTo:{name:"Test Person",line1:"1 Main St",cityStatePostal:"Toronto ON",country:"Canada"},items:[{title:"Card",quantity:1}],total:{value:"2",currency:"CAD"}};
-          const settings={storeName:"Piko Cards",returnName:"Piko Cards",returnAddress:{line1:"1 Test Rd",cityStatePostal:"Sorel QC",country:"Canada"},labelWidth:4,labelHeight:2};
+          const settings={storeName:"Piko Cards",returnName:"Piko Cards",returnAddress:{line1:"1 Test Rd",cityStatePostal:"Sorel QC",country:"Canada"},labelWidth:2.25,labelHeight:1.25};
           for(const buf of [labelsPdf([o],settings),packingPdf([o],settings),calibrationPdf(settings)]) if(!buf.toString("ascii",0,8).startsWith("%PDF-1.")) process.exit(1);
           console.log("PDF smoke tests passed");
           '
