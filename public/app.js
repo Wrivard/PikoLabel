@@ -1,18 +1,82 @@
-const $=id=>document.getElementById(id),state={orders:[],selected:new Set(),settings:{},auth:{},demo:true,view:"label",urls:[]};const esc=s=>String(s??"").replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));const money=v=>v?.value!=null?Number(v.value).toFixed(2)+" "+(v.currency||"CAD"):"";const qty=o=>(o.items||[]).reduce((n,i)=>n+Number(i.quantity||0),0);const toast=message=>{$("toast").textContent=message;setTimeout(()=>$("toast").textContent="",4000)};
+const $=id=>document.getElementById(id),state={orders:[],selected:new Set(),settings:{},auth:{},demo:true,view:"label",urls:[],docs:{packing:true,labels:true},previewUrl:null,previewSeq:0,previewTimer:null,screen:"orders"};const esc=s=>String(s??"").replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));const money=v=>v?.value!=null?Number(v.value).toFixed(2)+" "+(v.currency||"CAD"):"";const qty=o=>(o.items||[]).reduce((n,i)=>n+Number(i.quantity||0),0);const toast=message=>{$("toast").textContent=message;setTimeout(()=>$("toast").textContent="",4000)};
 async function call(path,options={}){const r=await fetch("/api/"+path,{credentials:"same-origin",headers:{"Content-Type":"application/json"},...options}),t=r.headers.get("content-type")||"",v=t.includes("json")?await r.json():await r.text();if(!r.ok)throw Error(v.error||"Request failed");return v}
 const addr=(name,a)=>[name,a?.line1,a?.line2,a?.cityStatePostal,a?.country].filter(Boolean).map(esc).join("<br>");
-async function initialize(){try{state.auth=await call("bootstrap");$("login").classList.toggle("hidden",state.auth.authenticated);$("app").classList.toggle("hidden",!state.auth.authenticated);if(!state.auth.authenticated)return;state.settings={...state.auth.settings,...JSON.parse(localStorage.getItem("piko-settings")||"{}")};populate();await reload()}catch(e){toast(e.message)}}
+async function initialize(){try{state.auth=await call("bootstrap");$("login").classList.toggle("hidden",state.auth.authenticated);$("app").classList.toggle("hidden",!state.auth.authenticated);if(!state.auth.authenticated)return;state.settings={...state.auth.settings,...JSON.parse(localStorage.getItem("piko-settings")||"{}")};try{state.docs={packing:true,labels:true,...JSON.parse(localStorage.getItem("piko-doc-choices")||"{}")}}catch{};$("include-packing").checked=state.docs.packing;$("include-labels").checked=state.docs.labels;populate();await reload()}catch(e){toast(e.message)}}
 function populate(){const s=state.settings,a=s.returnAddress||{};for(const [id,v] of Object.entries({storeName:s.storeName,returnName:s.returnName,line1:a.line1,line2:a.line2,cityStatePostal:a.cityStatePostal,country:a.country,thanks:s.thankYouMessage,width:s.labelWidth,height:s.labelHeight,font:s.labelFont,gap:s.labelGap}))$(id).value=v??"";$("border").checked=s.labelBorder!==false;$("connect").innerHTML=state.auth.connected?'<button id="disconnect" class="ghost">Disconnect eBay</button>':state.auth.ebayConfigured?'<a href="/api/oauth/start">Connect eBay →</a>':'<p>To connect real orders, add EBAY_CLIENT_ID, EBAY_CLIENT_SECRET, EBAY_RUNAME, APP_PASSWORD and APP_SECRET in Vercel settings.</p>';if($("disconnect"))$("disconnect").onclick=async()=>{await call("disconnect",{method:"POST"});location.reload()}}
 async function reload(){try{let result=await call("orders");state.orders=result.orders;state.demo=result.demo;$("status").textContent=result.demo?"Demo mode":"eBay connected";$("status").className="pill "+(result.demo?"":"live");state.selected=new Set([...state.selected].filter(id=>state.orders.some(o=>o.id===id)));render()}catch(e){toast(e.message)}}
 const filtered=()=>state.orders.filter(o=>JSON.stringify(o).toLowerCase().includes($("search").value.toLowerCase()));
-function render(){const list=filtered();$("count").textContent=state.orders.length;$("selected-count").textContent=state.selected.size+" selected";$("all").checked=!!list.length&&list.every(o=>state.selected.has(o.id));$("orders-list").innerHTML=list.length?list.map(o=>'<div class="order '+(state.selected.has(o.id)?"selected":"")+'" data-id="'+esc(o.id)+'"><input type="checkbox" '+(state.selected.has(o.id)?"checked":"")+'><div class="order-data"><div class="order-top"><b>'+esc(o.shipTo?.name||o.buyer)+'</b><span>'+esc((o.createdAt||"").slice(0,10))+'</span></div><div class="meta">#'+esc(o.displayId||o.id)+' · '+qty(o)+' cards · '+money(o.total)+'</div><div class="desc">'+esc((o.items||[]).map(i=>i.title).join(" · "))+'</div></div></div>').join(""):'<div class="foot">No orders to display.</div>';for(const el of document.querySelectorAll(".order"))el.onclick=()=>{const id=el.dataset.id;state.selected.has(id)?state.selected.delete(id):state.selected.add(id);render()};$("print").disabled=!state.selected.size;$("print").textContent="Prepare both · "+state.selected.size+" order"+(state.selected.size!==1?"s":"")+" →";preview()}
-function preview(){const o=state.orders.find(x=>state.selected.has(x.id))||state.orders[0],s=state.settings;$("view-label").classList.toggle("on",state.view==="label");$("view-slip").classList.toggle("on",state.view==="slip");if(!o){$("preview-doc").innerHTML="Select an order";return}if(state.view==="label")$("preview-doc").innerHTML='<div class="thermal"><div><b>SHIP FROM</b><p>'+addr(s.returnName,s.returnAddress)+'</p></div><div><b>SHIP TO</b><p>'+addr(o.shipTo?.name,o.shipTo)+'</p></div></div>';else $("preview-doc").innerHTML='<div class="slip"><h3>'+esc(s.storeName)+'</h3><hr><strong>SHIP TO</strong><p>'+addr(o.shipTo?.name,o.shipTo)+'</p><hr><p>Order #'+esc(o.displayId||o.id)+'</p><p>'+esc((o.items||[]).map(i=>i.title).join(" · "))+'</p><hr><p>'+esc(s.thankYouMessage)+'</p></div>';$("preview-note").textContent=state.view==="label"?s.labelWidth+" × "+s.labelHeight+" in · Two address blocks":"US Letter · 8.5 × 11 in";$("label-desc").textContent=s.labelWidth+" × "+s.labelHeight+" in · MUNBYN"}
-function screen(v){$("orders-screen").classList.toggle("hidden",v!=="orders");$("settings-screen").classList.toggle("hidden",v!=="settings");$("tab-orders").classList.toggle("on",v==="orders");$("tab-settings").classList.toggle("on",v==="settings");$("title").textContent=v==="orders"?"Shipping workspace":"Settings"}
+function render(){const list=filtered();$("count").textContent=state.orders.length;$("selected-count").textContent=state.selected.size+" selected";$("all").checked=!!list.length&&list.every(o=>state.selected.has(o.id));$("orders-list").innerHTML=list.length?list.map(o=>'<div class="order '+(state.selected.has(o.id)?"selected":"")+'" data-id="'+esc(o.id)+'"><input type="checkbox" '+(state.selected.has(o.id)?"checked":"")+'><div class="order-data"><div class="order-top"><b>'+esc(o.shipTo?.name||o.buyer)+'</b><span>'+esc((o.createdAt||"").slice(0,10))+'</span></div><div class="meta">#'+esc(o.displayId||o.id)+' · '+qty(o)+' cards · '+money(o.total)+'</div><div class="desc">'+esc((o.items||[]).map(i=>i.title).join(" · "))+'</div></div></div>').join(""):'<div class="foot">No orders to display.</div>';for(const el of document.querySelectorAll(".order"))el.onclick=()=>{const id=el.dataset.id;state.selected.has(id)?state.selected.delete(id):state.selected.add(id);render()};updatePrintControls();queuePreview()}
+// Preview the actual PDF returned by our server, using the currently selected eBay order.
+const docName=()=>state.docs.packing&&state.docs.labels?"both":state.docs.packing?"packing slip":state.docs.labels?"address label":"none";
+function updatePrintControls(){
+ const count=state.selected.size,active=!!(state.docs.packing||state.docs.labels),busy=state.working;
+ const type=state.docs.packing&&state.docs.labels?"both documents":state.docs.packing?"packing slips":state.docs.labels?"address labels":"documents";
+ const label="Prepare "+type+" · "+count+" order"+(count===1?"":"s")+" →";
+ $("print").textContent=busy?"Preparing PDFs…":label;$("print").disabled=!count||!active||busy;
+ $("tablet-print").textContent=busy?"Preparing…":"Prepare →";$("tablet-print").disabled=!count||!active||busy;
+ $("dock-orders").textContent=count+" order"+(count===1?"":"s")+" selected";$("dock-docs").textContent=active?type:"Select at least one document";
+ $("include-packing").checked=state.docs.packing;$("include-labels").checked=state.docs.labels;
+}
+function queuePreview(){
+ clearTimeout(state.previewTimer);
+ const seq=++state.previewSeq;
+ const order=state.orders.find(x=>state.selected.has(x.id))||state.orders[0];
+ $("view-label").classList.toggle("on",state.view==="label");$("view-slip").classList.toggle("on",state.view==="slip");
+ $("label-desc").textContent=state.settings.labelWidth+" × "+state.settings.labelHeight+" in · MUNBYN";
+ if(!order){$("preview-doc").replaceChildren();$("preview-status").textContent="Select an order to see its exact printable PDF.";$("preview-note").textContent="";return}
+ $("preview-status").textContent="Generating actual PDF preview…";
+ $("preview-note").textContent="Order #"+(order.displayId||order.id)+" · "+(state.view==="label"?"Thermal label":"US Letter packing slip")+(state.selected.size>1?" · first selected order":"");
+ state.previewTimer=setTimeout(()=>renderPdfPreview(order,seq),280);
+}
+async function renderPdfPreview(order,seq){
+ try{
+  const name=state.view==="label"?"labels":"packing";
+  const r=await fetch("/api/documents/"+name,{method:"POST",credentials:"same-origin",headers:{"Content-Type":"application/json"},body:JSON.stringify({orders:[order],settings:state.settings})});
+  if(!r.ok){const data=await r.json().catch(()=>({}));throw Error(data.error||"PDF preview unavailable")}
+  if(seq!==state.previewSeq)return;
+  const url=URL.createObjectURL(await r.blob());
+  if(seq!==state.previewSeq){URL.revokeObjectURL(url);return}
+  const old=state.previewUrl;state.previewUrl=url;
+  const title=state.view==="label"?"Actual label PDF":"Actual packing slip PDF";
+  const frame=document.createElement("iframe");frame.className="pdf-iframe";frame.title=title;frame.loading="eager";frame.src=url+"#toolbar=0&navpanes=0&view=Fit";
+  const wrapper=document.createElement("div");wrapper.className="pdf-sheet "+(state.view==="label"?"pdf-thermal":"pdf-letter");wrapper.appendChild(frame);
+  const open=document.createElement("a");open.className="preview-open";open.href=url;open.target="_blank";open.rel="noopener";open.textContent="Open full PDF preview ↗";
+  $("preview-doc").replaceChildren(wrapper,open);
+  $("preview-status").textContent=state.demo?"Exact PDF preview · Demo order":"Exact PDF preview · eBay order";
+  if(old)setTimeout(()=>URL.revokeObjectURL(old),1000);
+ }catch(e){if(seq!==state.previewSeq)return;$("preview-doc").replaceChildren();$("preview-status").textContent="Unable to preview PDF: "+e.message}
+}
+function screen(v){state.screen=v;$("tablet-dock").classList.toggle("hidden",v!=="orders");$("orders-screen").classList.toggle("hidden",v!=="orders");$("settings-screen").classList.toggle("hidden",v!=="settings");$("tab-orders").classList.toggle("on",v==="orders");$("tab-settings").classList.toggle("on",v==="settings");$("title").textContent=v==="orders"?"Shipping workspace":"Settings"}
 $("login-form").onsubmit=async e=>{e.preventDefault();try{await call("login",{method:"POST",body:JSON.stringify({password:$("password").value})});await initialize()}catch(e){$("login-error").textContent=e.message}};
-$("tab-orders").onclick=()=>screen("orders");$("tab-settings").onclick=()=>screen("settings");$("refresh").onclick=reload;$("reload").onclick=reload;$("search").oninput=render;$("all").onchange=e=>{for(const o of filtered())e.target.checked?state.selected.add(o.id):state.selected.delete(o.id);render()};$("view-label").onclick=()=>{state.view="label";preview()};$("view-slip").onclick=()=>{state.view="slip";preview()};
-$("save").onclick=()=>{const s=state.settings;s.storeName=$("storeName").value;s.returnName=$("returnName").value;s.returnAddress={line1:$("line1").value,line2:$("line2").value,cityStatePostal:$("cityStatePostal").value,country:$("country").value};s.thankYouMessage=$("thanks").value;s.labelWidth=Number($("width").value);s.labelHeight=Number($("height").value);s.labelFont=Number($("font").value);s.labelGap=Number($("gap").value);s.labelBorder=$("border").checked;localStorage.setItem("piko-settings",JSON.stringify(s));$("saved").textContent="Settings saved on this device.";preview();toast("Settings saved")};
+$("tab-orders").onclick=()=>screen("orders");$("tab-settings").onclick=()=>screen("settings");$("refresh").onclick=reload;$("reload").onclick=reload;$("search").oninput=render;$("all").onchange=e=>{for(const o of filtered())e.target.checked?state.selected.add(o.id):state.selected.delete(o.id);render()};$("view-label").onclick=()=>{state.view="label";queuePreview()};$("view-slip").onclick=()=>{state.view="slip";queuePreview()};
+for(const [id,kind] of [["include-packing","packing"],["include-labels","labels"]])$(id).onchange=e=>{state.docs[kind]=e.target.checked;localStorage.setItem("piko-doc-choices",JSON.stringify(state.docs));updatePrintControls()};
+$("tablet-print").onclick=()=>$("print").click();
+$("save").onclick=()=>{const s=state.settings;s.storeName=$("storeName").value;s.returnName=$("returnName").value;s.returnAddress={line1:$("line1").value,line2:$("line2").value,cityStatePostal:$("cityStatePostal").value,country:$("country").value};s.thankYouMessage=$("thanks").value;s.labelWidth=Number($("width").value);s.labelHeight=Number($("height").value);s.labelFont=Number($("font").value);s.labelGap=Number($("gap").value);s.labelBorder=$("border").checked;localStorage.setItem("piko-settings",JSON.stringify(s));$("saved").textContent="Settings saved on this device.";queuePreview();toast("Settings saved")};
 $("logout").onclick=async()=>{await call("logout",{method:"POST"});location.reload()};$("close").onclick=()=>{$("modal").classList.add("hidden")};
-$("print").onclick=async()=>{const orders=state.orders.filter(o=>state.selected.has(o.id));if(!orders.length)return;$("print").disabled=true;try{let docs=await Promise.all(["packing","labels"].map(async name=>{let r=await fetch("/api/documents/"+name,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({orders,settings:state.settings})});if(!r.ok){let j=await r.json();throw Error(j.error||"PDF failed")}return URL.createObjectURL(await r.blob())}));state.urls.forEach(URL.revokeObjectURL);state.urls=docs;$("packing-link").href=docs[0];$("labels-link").href=docs[1];$("ready").textContent=orders.length+" orders · "+orders.length+" Letter packing slips and "+orders.length+" thermal labels.";$("modal").classList.remove("hidden")}catch(e){toast(e.message)}finally{render()}};
+$("print").onclick=async()=>{
+ const orders=state.orders.filter(o=>state.selected.has(o.id));
+ const kinds=[state.docs.packing?"packing":null,state.docs.labels?"labels":null].filter(Boolean);
+ if(!orders.length||!kinds.length||state.working)return;
+ state.working=true;updatePrintControls();
+ try{
+  // The same PDF endpoints power both preview and final documents.
+  const links=await Promise.all(kinds.map(async kind=>{
+   const r=await fetch("/api/documents/"+kind,{method:"POST",credentials:"same-origin",headers:{"Content-Type":"application/json"},body:JSON.stringify({orders,settings:state.settings})});
+   if(!r.ok){const data=await r.json().catch(()=>({}));throw Error(data.error||"PDF generation failed")}
+   return [kind,URL.createObjectURL(await r.blob())]
+  }));
+  state.urls.forEach(URL.revokeObjectURL);state.urls=links.map(pair=>pair[1]);
+  for(const [kind,id] of [["packing","packing-link"],["labels","labels-link"]]){
+   const link=links.find(pair=>pair[0]===kind),el=$(id);
+   el.classList.toggle("hidden",!link);
+   if(link)el.href=link[1];else el.removeAttribute("href");
+  }
+  const names=kinds.map(kind=>kind==="packing"?"packing slips":"address labels").join(" + ");
+  $("ready").textContent=orders.length+" order"+(orders.length===1?"":"s")+" · "+names+".";
+  $("modal").classList.remove("hidden");
+ }catch(e){toast(e.message)}
+ finally{state.working=false;updatePrintControls()}
+};
 function testPrinter(type){
   const isLabel=type==="label";
   const w=Math.min(4.3,Math.max(2.2,Number(state.settings.labelWidth)||4));
@@ -29,4 +93,5 @@ function testPrinter(type){
 }
 $("test-canon").onclick=()=>testPrinter("letter");
 $("test-munbyn").onclick=()=>testPrinter("label");
+$("tablet-dock").classList.remove("hidden");
 initialize();
