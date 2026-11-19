@@ -52,24 +52,38 @@ function createPdf(pages){
 }
 function addressLines(name,addr){return [name,addr?.line1,addr?.line2,addr?.cityStatePostal,addr?.country].filter(Boolean).map(clean);}
 function renderAddressBlock(lines,x,top,w,maxH,title,fontSize){
- let c=text(x,top,title,8.3,true);let y=top-12;
- // Shrink font to fit every line vertically and horizontally, avoiding address truncation.
- let size=fontSize;let all=[];
- for(;size>=5.5;size-=.4){all=lines.flatMap(l=>wrap(l,w,size));if(all.length*(size+2)<=maxH-16)break;}
- for(const row of all)c+=text(x,y,row,size,false),y-=size+2;
+ const headingSize=Math.min(8.3,Math.max(6.8,fontSize));
+ let c=text(x,top,title,headingSize,true);let y=top-headingSize-5;
+ // Fit all address lines within the physical label, wrapping instead of clipping.
+ let size=fontSize,all=[];
+ for(;size>=5.5;size-=.4){
+   all=lines.flatMap(l=>wrap(l,w,size));
+   if(all.length*(size+1.6)<=maxH-headingSize-6)break;
+ }
+ size=Math.max(5.5,size);
+ for(const row of all){c+=text(x,y,row,size,false);y-=size+1.6;}
  return c;
 }
 export function labelsPdf(orders,settings){
  const w=(Number(settings.labelWidth)||4)*PT,h=(Number(settings.labelHeight)||2)*PT;
- const margin=Number(settings.labelMargin??.12)*PT,gap=Number(settings.labelGap??.13)*PT;
- if(w<2.2*PT||w>4.3*PT||h<1.25*PT||h>6.2*PT)throw new Error('Label size must be between 2.2–4.3 in wide and 1.25–6.2 in high.');
- const splitX=(w-gap)/2;const colW=(w-2*margin-gap)/2;const leftX=margin,rightX=margin+colW+gap;
- const sender=addressLines(settings.returnName, settings.returnAddress);
+ const margin=Number(settings.labelMargin??.06)*PT,gap=Number(settings.labelGap??.12)*PT;
+ if(w<2.2*PT||w>4.3*PT||h<1.25*PT||h>6.2*PT)throw new Error('Label size must be between 2.2-4.3 in wide and 1.25-6.2 in high.');
+ // The tested Word template uses TWO WIDE, SEPARATE rectangles with whitespace
+ // between them, not one tall 4x2 frame with a centre divider.
+ const boxW=(w-2*margin-gap)/2;
+ const boxH=h-2*margin;
+ const leftX=margin,rightX=margin+boxW+gap;
+ const inside=.08*PT;
+ const sender=addressLines(settings.returnName,settings.returnAddress);
  const pages=orders.map(order=>{
    let c='0 0 0 RG 0 0 0 rg\n';
-   if(settings.labelBorder!==false){c+=rect(3,3,w-6,h-6,.6);c+=line(splitX+gap/2,margin,splitX+gap/2,h-margin,.45);}
-   c+=renderAddressBlock(sender,leftX,h-margin-8,colW,h-2*margin-5,'SHIP FROM',Number(settings.labelFont)||8.5);
-   c+=renderAddressBlock(addressLines(order.shipTo?.name,order.shipTo),rightX,h-margin-8,colW,h-2*margin-5,'SHIP TO',Number(settings.labelFont)||8.5);
+   if(settings.labelBorder!==false){
+     c+=rect(leftX,margin,boxW,boxH,.55);
+     c+=rect(rightX,margin,boxW,boxH,.55);
+   }
+   const top=h-margin-inside-6,maxTextH=boxH-2*inside;
+   c+=renderAddressBlock(sender,leftX+inside,top,boxW-2*inside,maxTextH,'SHIP FROM',Number(settings.labelFont)||8);
+   c+=renderAddressBlock(addressLines(order.shipTo?.name,order.shipTo),rightX+inside,top,boxW-2*inside,maxTextH,'SHIP TO',Number(settings.labelFont)||8);
    return {w,h,commands:c};
  });return createPdf(pages);
 }
@@ -110,4 +124,20 @@ export function packingPdf(orders,settings){
    c+=text(m,35,'Thank you for supporting a Canadian small business.',8);
    return {w,h,commands:c};
  });return createPdf(pages);
+}
+
+/** Calibration sheet for matching custom thermal stock, measured at 100% print scale. */
+export function calibrationPdf(settings){
+ const width=Number(settings.labelWidth)||4,height=Number(settings.labelHeight)||1.25;
+ const w=width*PT,h=height*PT;
+ if(w<2.2*PT||w>4.3*PT||h<1.25*PT||h>6.2*PT)throw new Error('Unsupported label dimensions');
+ const m=7,g=Math.max(0,Number(settings.labelGap??.12))*PT;
+ const boxW=(w-2*m-g)/2;
+ let c='0 0 0 RG 0 0 0 rg\n';
+ c+=rect(m,m,boxW,h-2*m,.65)+rect(m+boxW+g,m,boxW,h-2*m,.65);
+ c+=text(m+8,h-22,'SHIP FROM',7.3,true);
+ c+=text(m+boxW+g+8,h-22,'SHIP TO',7.3,true);
+ c+=text(m+8,h-34,width.toFixed(2)+' x '+height.toFixed(2)+' in',7);
+ if(h>=85){const x=Math.max(8,w-86),y=18;c+=line(x,y,x+72,y,1.4);c+=line(x,y-3,x,y+3,.9);c+=line(x+72,y-3,x+72,y+3,.9);c+=text(x+12,y+6,'1 inch - measure',7);}
+ return createPdf([{w,h,commands:c}]);
 }

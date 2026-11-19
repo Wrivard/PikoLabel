@@ -1,8 +1,12 @@
 const $=id=>document.getElementById(id),state={orders:[],selected:new Set(),settings:{},auth:{},demo:true,view:"label",urls:[],docs:{packing:true,labels:true},previewUrl:null,previewSeq:0,previewTimer:null,screen:"orders"};const esc=s=>String(s??"").replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));const money=v=>v?.value!=null?Number(v.value).toFixed(2)+" "+(v.currency||"CAD"):"";const qty=o=>(o.items||[]).reduce((n,i)=>n+Number(i.quantity||0),0);const toast=message=>{$("toast").textContent=message;setTimeout(()=>$("toast").textContent="",4000)};
 async function call(path,options={}){const r=await fetch("/api/"+path,{credentials:"same-origin",headers:{"Content-Type":"application/json"},...options}),t=r.headers.get("content-type")||"",v=t.includes("json")?await r.json():await r.text();if(!r.ok)throw Error(v.error||"Request failed");return v}
 const addr=(name,a)=>[name,a?.line1,a?.line2,a?.cityStatePostal,a?.country].filter(Boolean).map(esc).join("<br>");
-async function initialize(){try{state.auth=await call("bootstrap");$("login").classList.toggle("hidden",state.auth.authenticated);$("app").classList.toggle("hidden",!state.auth.authenticated);if(!state.auth.authenticated)return;state.settings={...state.auth.settings,...JSON.parse(localStorage.getItem("piko-settings")||"{}")};try{state.docs={packing:true,labels:true,...JSON.parse(localStorage.getItem("piko-doc-choices")||"{}")}}catch{};$("include-packing").checked=state.docs.packing;$("include-labels").checked=state.docs.labels;populate();await reload()}catch(e){toast(e.message)}}
-function populate(){const s=state.settings,a=s.returnAddress||{};for(const [id,v] of Object.entries({storeName:s.storeName,returnName:s.returnName,line1:a.line1,line2:a.line2,cityStatePostal:a.cityStatePostal,country:a.country,thanks:s.thankYouMessage,width:s.labelWidth,height:s.labelHeight,font:s.labelFont,gap:s.labelGap}))$(id).value=v??"";$("border").checked=s.labelBorder!==false;$("connect").innerHTML=state.auth.connected?'<button id="disconnect" class="ghost">Disconnect eBay</button>':state.auth.ebayConfigured?'<a href="/api/oauth/start">Connect eBay →</a>':'<p>To connect real orders, add EBAY_CLIENT_ID, EBAY_CLIENT_SECRET, EBAY_RUNAME, APP_PASSWORD and APP_SECRET in Vercel settings.</p>';if($("disconnect"))$("disconnect").onclick=async()=>{await call("disconnect",{method:"POST"});location.reload()}}
+async function initialize(){try{state.auth=await call("bootstrap");$("login").classList.toggle("hidden",state.auth.authenticated);$("app").classList.toggle("hidden",!state.auth.authenticated);if(!state.auth.authenticated)return;const stored=JSON.parse(localStorage.getItem("piko-settings")||"{}");state.settings={...state.auth.settings,...stored};
+  // Upgrade the old default 4 x 2 layout; preserve other previously customized sizes.
+  if(!stored.labelProfile&&Number(state.settings.labelWidth)===4&&Number(state.settings.labelHeight)===2){
+    Object.assign(state.settings,{labelHeight:1.25,labelGap:.12,labelMargin:.06,labelFont:8,labelProfile:"word"});
+  }try{state.docs={packing:true,labels:true,...JSON.parse(localStorage.getItem("piko-doc-choices")||"{}")}}catch{};$("include-packing").checked=state.docs.packing;$("include-labels").checked=state.docs.labels;populate();await reload()}catch(e){toast(e.message)}}
+function populate(){const s=state.settings,a=s.returnAddress||{};for(const [id,v] of Object.entries({storeName:s.storeName,returnName:s.returnName,line1:a.line1,line2:a.line2,cityStatePostal:a.cityStatePostal,country:a.country,thanks:s.thankYouMessage,width:s.labelWidth,height:s.labelHeight,font:s.labelFont,gap:s.labelGap}))$(id).value=v??"";$("border").checked=s.labelBorder!==false;$("labelPreset").value=s.labelProfile||((Number(s.labelWidth)===4&&Number(s.labelHeight)===1.25)?"word":"custom");$("connect").innerHTML=state.auth.connected?'<button id="disconnect" class="ghost">Disconnect eBay</button>':state.auth.ebayConfigured?'<a href="/api/oauth/start">Connect eBay →</a>':'<p>To connect real orders, add EBAY_CLIENT_ID, EBAY_CLIENT_SECRET, EBAY_RUNAME, APP_PASSWORD and APP_SECRET in Vercel settings.</p>';if($("disconnect"))$("disconnect").onclick=async()=>{await call("disconnect",{method:"POST"});location.reload()}}
 async function reload(){try{let result=await call("orders");state.orders=result.orders;state.demo=result.demo;$("status").textContent=result.demo?"Demo mode":"eBay connected";$("status").className="pill "+(result.demo?"":"live");state.selected=new Set([...state.selected].filter(id=>state.orders.some(o=>o.id===id)));render()}catch(e){toast(e.message)}}
 const filtered=()=>state.orders.filter(o=>JSON.stringify(o).toLowerCase().includes($("search").value.toLowerCase()));
 function render(){const list=filtered();$("count").textContent=state.orders.length;$("selected-count").textContent=state.selected.size+" selected";$("all").checked=!!list.length&&list.every(o=>state.selected.has(o.id));$("orders-list").innerHTML=list.length?list.map(o=>'<div class="order '+(state.selected.has(o.id)?"selected":"")+'" data-id="'+esc(o.id)+'"><input type="checkbox" '+(state.selected.has(o.id)?"checked":"")+'><div class="order-data"><div class="order-top"><b>'+esc(o.shipTo?.name||o.buyer)+'</b><span>'+esc((o.createdAt||"").slice(0,10))+'</span></div><div class="meta">#'+esc(o.displayId||o.id)+' · '+qty(o)+' cards · '+money(o.total)+'</div><div class="desc">'+esc((o.items||[]).map(i=>i.title).join(" · "))+'</div></div></div>').join(""):'<div class="foot">No orders to display.</div>';for(const el of document.querySelectorAll(".order"))el.onclick=()=>{const id=el.dataset.id;state.selected.has(id)?state.selected.delete(id):state.selected.add(id);render()};updatePrintControls();queuePreview()}
@@ -39,7 +43,7 @@ async function renderPdfPreview(order,seq){
   const old=state.previewUrl;state.previewUrl=url;
   const title=state.view==="label"?"Actual label PDF":"Actual packing slip PDF";
   const frame=document.createElement("iframe");frame.className="pdf-iframe";frame.title=title;frame.loading="eager";frame.src=url+"#toolbar=0&navpanes=0&view=Fit";
-  const wrapper=document.createElement("div");wrapper.className="pdf-sheet "+(state.view==="label"?"pdf-thermal":"pdf-letter");wrapper.appendChild(frame);
+  const wrapper=document.createElement("div");wrapper.className="pdf-sheet "+(state.view==="label"?"pdf-thermal":"pdf-letter");if(state.view==="label")wrapper.style.aspectRatio=String(Number(state.settings.labelWidth)||4)+"/"+String(Number(state.settings.labelHeight)||1.25);wrapper.appendChild(frame);
   const open=document.createElement("a");open.className="preview-open";open.href=url;open.target="_blank";open.rel="noopener";open.textContent="Open full PDF preview ↗";
   $("preview-doc").replaceChildren(wrapper,open);
   $("preview-status").textContent=state.demo?"Exact PDF preview · Demo order":"Exact PDF preview · eBay order";
@@ -51,7 +55,7 @@ $("login-form").onsubmit=async e=>{e.preventDefault();try{await call("login",{me
 $("tab-orders").onclick=()=>screen("orders");$("tab-settings").onclick=()=>screen("settings");$("refresh").onclick=reload;$("reload").onclick=reload;$("search").oninput=render;$("all").onchange=e=>{for(const o of filtered())e.target.checked?state.selected.add(o.id):state.selected.delete(o.id);render()};$("view-label").onclick=()=>{state.view="label";queuePreview()};$("view-slip").onclick=()=>{state.view="slip";queuePreview()};
 for(const [id,kind] of [["include-packing","packing"],["include-labels","labels"]])$(id).onchange=e=>{state.docs[kind]=e.target.checked;localStorage.setItem("piko-doc-choices",JSON.stringify(state.docs));updatePrintControls()};
 $("tablet-print").onclick=()=>$("print").click();
-$("save").onclick=()=>{const s=state.settings;s.storeName=$("storeName").value;s.returnName=$("returnName").value;s.returnAddress={line1:$("line1").value,line2:$("line2").value,cityStatePostal:$("cityStatePostal").value,country:$("country").value};s.thankYouMessage=$("thanks").value;s.labelWidth=Number($("width").value);s.labelHeight=Number($("height").value);s.labelFont=Number($("font").value);s.labelGap=Number($("gap").value);s.labelBorder=$("border").checked;localStorage.setItem("piko-settings",JSON.stringify(s));$("saved").textContent="Settings saved on this device.";queuePreview();toast("Settings saved")};
+$("save").onclick=()=>{const s=state.settings;s.storeName=$("storeName").value;s.returnName=$("returnName").value;s.returnAddress={line1:$("line1").value,line2:$("line2").value,cityStatePostal:$("cityStatePostal").value,country:$("country").value};s.thankYouMessage=$("thanks").value;s.labelWidth=Number($("width").value);s.labelHeight=Number($("height").value);s.labelFont=Number($("font").value);s.labelGap=Number($("gap").value);s.labelBorder=$("border").checked;s.labelProfile=$("labelPreset").value;s.labelMargin=Number(s.labelMargin)||.06;localStorage.setItem("piko-settings",JSON.stringify(s));$("saved").textContent="Settings saved on this device.";queuePreview();toast("Settings saved")};
 $("logout").onclick=async()=>{await call("logout",{method:"POST"});location.reload()};$("close").onclick=()=>{$("modal").classList.add("hidden")};
 $("print").onclick=async()=>{
  const orders=state.orders.filter(o=>state.selected.has(o.id));
@@ -91,6 +95,35 @@ function testPrinter(type){
   // Some Android browsers block automatic print dialogs; the visible button is a fallback.
   try{pop.print()}catch{}
 }
+$("labelPreset").onchange=()=>{
+ const preset=$("labelPreset").value;
+ if(preset==="word"){
+  for(const [id,v] of Object.entries({width:4,height:1.25,font:8,gap:.12}))$(id).value=v;
+  Object.assign(state.settings,{labelWidth:4,labelHeight:1.25,labelFont:8,labelGap:.12,labelMargin:.06,labelProfile:"word"});
+ }else if(preset==="standard"){
+  for(const [id,v] of Object.entries({width:4,height:2,font:8.5,gap:.13}))$(id).value=v;
+  Object.assign(state.settings,{labelWidth:4,labelHeight:2,labelFont:8.5,labelGap:.13,labelMargin:.12,labelProfile:"standard"});
+ }else state.settings.labelProfile="custom";
+ queuePreview();
+};
+for(const [id,key] of [["width","labelWidth"],["height","labelHeight"],["font","labelFont"],["gap","labelGap"]]){
+ $(id).addEventListener("change",()=>{
+  state.settings[key]=Number($(id).value)||state.settings[key];
+  state.settings.labelProfile="custom";$("labelPreset").value="custom";
+  queuePreview();
+ });
+}
+$("calibration").onclick=async()=>{
+ // Open a tab during the user gesture before asynchronously requesting PDF.
+ const pop=window.open("","_blank");
+ if(!pop){toast("Allow pop-ups for the size test PDF.");return}
+ pop.document.write("<p style='font:16px sans-serif;padding:30px'>Preparing exact-size test PDF…</p>");
+ try{
+   const r=await fetch("/api/documents/calibration",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({settings:state.settings})});
+   if(!r.ok)throw Error((await r.json().catch(()=>({}))).error||"Calibration PDF failed");
+   const url=URL.createObjectURL(await r.blob());pop.location.href=url;
+ }catch(e){pop.close();toast(e.message)}
+};
 $("test-canon").onclick=()=>testPrinter("letter");
 $("test-munbyn").onclick=()=>testPrinter("label");
 $("tablet-dock").classList.remove("hidden");
