@@ -1,13 +1,16 @@
 const $=id=>document.getElementById(id),state={orders:[],selected:new Set(),settings:{},auth:{},demo:true,view:"label",urls:[],docs:{packing:true,labels:true},previewUrl:null,previewSeq:0,previewTimer:null,screen:"orders"};const esc=s=>String(s??"").replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));const money=v=>v?.value!=null?Number(v.value).toFixed(2)+" "+(v.currency||"CAD"):"";const qty=o=>(o.items||[]).reduce((n,i)=>n+Number(i.quantity||0),0);const toast=message=>{$("toast").textContent=message;setTimeout(()=>$("toast").textContent="",4000)};
 async function call(path,options={}){const r=await fetch("/api/"+path,{credentials:"same-origin",headers:{"Content-Type":"application/json"},...options}),t=r.headers.get("content-type")||"",v=t.includes("json")?await r.json():await r.text();if(!r.ok)throw Error(v.error||"Request failed");return v}
 const addr=(name,a)=>[name,a?.line1,a?.line2,a?.cityStatePostal,a?.country].filter(Boolean).map(esc).join("<br>");
-async function initialize(){try{state.auth=await call("bootstrap");$("login").classList.toggle("hidden",state.auth.authenticated);$("app").classList.toggle("hidden",!state.auth.authenticated);if(!state.auth.authenticated)return;$("login-device-status").textContent=state.auth.rememberedBrowser?"This browser is remembered. Your login renews automatically when you visit. Use Sign out to remove access.":"This is a temporary login. Sign out when finished.";const stored=JSON.parse(localStorage.getItem("piko-settings")||"{}");state.settings={...state.auth.settings,...stored};
+async function initialize(){try{state.auth=await call("bootstrap");$("login").classList.toggle("hidden",state.auth.authenticated);$("app").classList.toggle("hidden",!state.auth.authenticated);if(!state.auth.authenticated)return;$("login-device-status").textContent=state.auth.rememberedBrowser?"This browser is remembered. Your login renews automatically when you visit. Use Sign out to remove access.":"This is a temporary login. Sign out when finished.";let stored={};try{stored=JSON.parse(localStorage.getItem("piko-settings")||"{}")||{}}catch{}
+  const serverSavedAt=Number(state.auth.settingsSavedAt||0),localSavedAt=Number(stored.settingsSavedAt||0);
+  state.settings={...state.auth.settings,...(localSavedAt>=serverSavedAt?stored:state.auth.settings)};
+  delete state.settings.settingsSavedAt;
   // Upgrade the old default 4 x 2 layout; preserve other previously customized sizes.
   if(!stored.labelProfile && Number(state.settings.labelWidth)===4 && Number(state.settings.labelHeight)===2){
     Object.assign(state.settings,{labelWidth:2.25,labelHeight:1.25,labelGap:0,labelMargin:.14,labelFont:10,labelBorder:false,labelProfile:"word"});
   } else if(stored.labelProfile==="word" && Number(stored.labelWidth)===4){
     Object.assign(state.settings,{labelWidth:2.25,labelHeight:1.25,labelGap:0,labelMargin:.14,labelFont:10,labelBorder:false,labelProfile:"word"});
-  }try{state.docs={packing:true,labels:true,...JSON.parse(localStorage.getItem("piko-doc-choices")||"{}")}}catch{};$("include-packing").checked=state.docs.packing;$("include-labels").checked=state.docs.labels;populate();await reload()}catch(e){toast(e.message)}}
+  }try{state.docs={packing:true,labels:true,...JSON.parse(localStorage.getItem("piko-doc-choices")||"{}")}}catch{};$("include-packing").checked=state.docs.packing;$("include-labels").checked=state.docs.labels;populate();$("business-saved").textContent="Changes save automatically on this browser (not across devices).";await reload()}catch(e){toast(e.message)}}
 function populate(){const s=state.settings,a=s.returnAddress||{};for(const [id,v] of Object.entries({storeName:s.storeName,returnName:s.returnName,line1:a.line1,line2:a.line2,cityStatePostal:a.cityStatePostal,country:a.country,thanks:s.thankYouMessage,width:s.labelWidth,height:s.labelHeight,font:s.labelFont,gap:s.labelGap}))$(id).value=v??"";$("border").checked=s.labelBorder!==false;$("labelPreset").value=s.labelProfile||((Number(s.labelWidth)===2.25&&Number(s.labelHeight)===1.25)?"word":"custom");$("connect").innerHTML=state.auth.connected?'<button id="disconnect" class="ghost">Disconnect eBay</button>':state.auth.ebayConfigured?'<a href="/api/oauth/start">Connect eBay →</a>':'<p>To connect real orders, add EBAY_CLIENT_ID, EBAY_CLIENT_SECRET, EBAY_RUNAME, APP_PASSWORD and APP_SECRET in Vercel settings.</p>';if($("disconnect"))$("disconnect").onclick=async()=>{await call("disconnect",{method:"POST"});location.reload()}}
 async function reload(){try{let result=await call("orders");state.orders=result.orders;state.demo=result.demo;$("status").textContent=result.demo?"Demo mode":"eBay connected";$("status").className="pill "+(result.demo?"":"live");state.selected=new Set([...state.selected].filter(id=>state.orders.some(o=>o.id===id)));render()}catch(e){toast(e.message)}}
 const filtered=()=>state.orders.filter(o=>JSON.stringify(o).toLowerCase().includes($("search").value.toLowerCase()));
@@ -57,7 +60,46 @@ $("login-form").onsubmit=async e=>{e.preventDefault();$("login-error").textConte
 $("tab-orders").onclick=()=>screen("orders");$("tab-settings").onclick=()=>screen("settings");$("refresh").onclick=reload;$("reload").onclick=reload;$("search").oninput=render;$("all").onchange=e=>{for(const o of filtered())e.target.checked?state.selected.add(o.id):state.selected.delete(o.id);render()};$("view-label").onclick=()=>{state.view="label";queuePreview()};$("view-slip").onclick=()=>{state.view="slip";queuePreview()};
 for(const [id,kind] of [["include-packing","packing"],["include-labels","labels"]])$(id).onchange=e=>{state.docs[kind]=e.target.checked;localStorage.setItem("piko-doc-choices",JSON.stringify(state.docs));updatePrintControls()};
 $("tablet-print").onclick=()=>$("print").click();
-$("save").onclick=()=>{const s=state.settings;s.storeName=$("storeName").value;s.returnName=$("returnName").value;s.returnAddress={line1:$("line1").value,line2:$("line2").value,cityStatePostal:$("cityStatePostal").value,country:$("country").value};s.thankYouMessage=$("thanks").value;s.labelWidth=Number($("width").value);s.labelHeight=Number($("height").value);s.labelFont=Number($("font").value);s.labelGap=Number($("gap").value);s.labelBorder=$("border").checked;s.labelProfile=$("labelPreset").value;s.labelMargin=Number(s.labelMargin)||.06;localStorage.setItem("piko-settings",JSON.stringify(s));$("saved").textContent="Settings saved on this device.";queuePreview();toast("Settings saved")};
+let settingsVersion=0,savedVersion=0,saveTimer=null,saveRunning=false;
+function collectSettings(){
+ const s=state.settings;
+ s.storeName=$("storeName").value;s.returnName=$("returnName").value;
+ s.returnAddress={line1:$("line1").value,line2:$("line2").value,cityStatePostal:$("cityStatePostal").value,country:$("country").value};
+ s.thankYouMessage=$("thanks").value;
+ s.labelWidth=Number($("width").value)||s.labelWidth;
+ s.labelHeight=Number($("height").value)||s.labelHeight;
+ s.labelFont=Number($("font").value)||s.labelFont;
+ s.labelGap=Number($("gap").value);
+ s.labelBorder=$("border").checked;
+ s.labelProfile=$("labelPreset").value;
+ s.labelMargin=Number(s.labelMargin??.14);
+ return {...s,returnAddress:{...s.returnAddress}};
+}
+function statusSave(message,failed=false){
+ for(const id of ["business-saved","saved"]){$(id).textContent=message;$(id).classList.toggle("save-error",failed)}
+}
+function scheduleSettingsSave(immediate=false){
+ collectSettings();settingsVersion++;
+ try{localStorage.setItem("piko-settings",JSON.stringify({...state.settings,settingsSavedAt:Date.now()}))}catch{}
+ statusSave("Saving changes…");
+ clearTimeout(saveTimer);saveTimer=setTimeout(()=>void persistSettings(),immediate?0:700);
+}
+async function persistSettings(){
+ clearTimeout(saveTimer);if(saveRunning)return;saveRunning=true;
+ try{
+  while(savedVersion<settingsVersion){
+   const snapshot={...state.settings,returnAddress:{...state.settings.returnAddress}},version=settingsVersion;
+   await call("settings",{method:"POST",body:JSON.stringify({settings:snapshot})});
+   savedVersion=version;
+   if(savedVersion===settingsVersion)statusSave("Saved ✓ Your details will load next time you open this browser.");
+  }
+ }catch(e){statusSave("Browser backup failed: "+e.message+". Tap Save to retry.",true)}
+ finally{saveRunning=false}
+}
+for(const id of ["storeName","returnName","line1","line2","cityStatePostal","country","thanks"])$(id).addEventListener("input",()=>scheduleSettingsSave());
+$("business-save").onclick=()=>scheduleSettingsSave(true);
+$("save").onclick=()=>scheduleSettingsSave(true);
+
 $("logout").onclick=async()=>{await call("logout",{method:"POST"});location.reload()};$("close").onclick=()=>{$("modal").classList.add("hidden")};
 $("print").onclick=async()=>{
  const orders=state.orders.filter(o=>state.selected.has(o.id));
@@ -106,15 +148,16 @@ $("labelPreset").onchange=()=>{
   for(const [id,v] of Object.entries({width:4,height:2,font:8.5,gap:.13}))$(id).value=v;
   Object.assign(state.settings,{labelWidth:4,labelHeight:2,labelFont:8.5,labelGap:.13,labelMargin:.12,labelProfile:"standard"});
  }else state.settings.labelProfile="custom";
- queuePreview();
+ scheduleSettingsSave();queuePreview();
 };
 for(const [id,key] of [["width","labelWidth"],["height","labelHeight"],["font","labelFont"],["gap","labelGap"]]){
  $(id).addEventListener("change",()=>{
   state.settings[key]=Number($(id).value)||state.settings[key];
   state.settings.labelProfile="custom";$("labelPreset").value="custom";
-  queuePreview();
+  scheduleSettingsSave();queuePreview();
  });
 }
+$("border").addEventListener("change",()=>{scheduleSettingsSave();queuePreview()});
 $("calibration").onclick=async()=>{
  // Open a tab during the user gesture before asynchronously requesting PDF.
  const pop=window.open("","_blank");

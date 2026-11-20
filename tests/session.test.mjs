@@ -78,3 +78,43 @@ test("wrong password cannot create a remembered session",async()=>{
  assert.equal(login.statusCode,401);
  assert.equal(login.setCookies.length,0);
 });
+
+test("business details save to an encrypted cookie and rehydrate on reload",async()=>{
+ const login=await request("login",{method:"POST",body:{password:process.env.APP_PASSWORD,remember:true}});
+ const profile={
+   storeName:"Piko Cards Shop",returnName:"Seller Name",
+   returnAddress:{line1:"123 Example Road",line2:"Unit 4",cityStatePostal:"Sorel-Tracy QC J3P 1A1",country:"Canada"},
+   thankYouMessage:"Thanks for supporting our store!",
+   labelWidth:2.25,labelHeight:1.25,labelFont:10,labelProfile:"word"
+ };
+ const saved=await request("settings",{method:"POST",cookie:login.cookie,body:{settings:profile}});
+ assert.equal(saved.json.ok,true);
+ assert.equal(saved.json.settings.storeName,profile.storeName);
+ const set=saved.setCookies.find(x=>x.startsWith("piko_profile="));
+ assert.ok(set);
+ for(const attribute of ["HttpOnly","Secure","Max-Age=31536000"])assert.ok(set.includes(attribute),attribute);
+ assert.equal(set.includes(profile.returnAddress.line1),false);
+ const cookies=login.cookie+"; "+saved.cookie;
+ const reboot=await request("bootstrap",{cookie:cookies});
+ assert.equal(reboot.json.authenticated,true);
+ assert.equal(reboot.json.settings.returnAddress.cityStatePostal,profile.returnAddress.cityStatePostal);
+ assert.equal(reboot.json.settings.thankYouMessage,profile.thankYouMessage);
+ assert.ok(reboot.json.settingsSavedAt>0);
+ const get=await request("settings",{cookie:cookies});
+ assert.equal(get.json.settings.storeName,profile.storeName);
+});
+test("business details are protected from unauthenticated requests",async()=>{
+ const login=await request("login",{method:"POST",body:{password:process.env.APP_PASSWORD,remember:true}});
+ const saved=await request("settings",{method:"POST",cookie:login.cookie,body:{settings:{storeName:"Private Store"}}});
+ const anonymous=await request("bootstrap",{cookie:saved.cookie});
+ assert.equal(anonymous.json.authenticated,false);
+ assert.notEqual(anonymous.json.settings.storeName,"Private Store");
+ const forbidden=await request("settings",{method:"POST",body:{settings:{storeName:"Unauthorized"}}});
+ assert.equal(forbidden.statusCode,401);
+});
+test("settings save clamps numerical values and ignores unrelated properties",async()=>{
+ const login=await request("login",{method:"POST",body:{password:process.env.APP_PASSWORD,remember:true}});
+ const saved=await request("settings",{method:"POST",cookie:login.cookie,body:{settings:{storeName:"Test",unknown:"private",labelWidth:15}}});
+ assert.equal(saved.json.settings.unknown,undefined);
+ assert.equal(saved.json.settings.labelWidth,4.3);
+});
