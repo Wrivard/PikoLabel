@@ -127,58 +127,94 @@ function canonSlipHtml(orders,s){
  const startup="function printIfFits(){let ok=true;document.querySelectorAll(\".sheet\").forEach(sheet=>{const grid=sheet.querySelector(\".items-grid\"),cols=[...sheet.querySelectorAll(\".item-column\")];for(const size of [\"7.2pt\",\"6.8pt\",\"6.4pt\",\"6.0pt\"]){if(cols.every(c=>c.scrollHeight<=grid.clientHeight+2))break;grid.style.fontSize=size;}if(cols.some(c=>c.scrollHeight>grid.clientHeight+2))ok=false;});if(!ok){const p=document.getElementById(\"overflow-warning\");p.textContent=\"All item descriptions cannot fit on one page; printing stopped to prevent missing cards.\";p.style.display=\"block\";return;}window.print();}window.addEventListener(\"load\",()=>setTimeout(()=>{try{printIfFits()}catch(e){}},300));";
  return '<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Piko Packing Slip — Canon</title><style>'+css+moreCss+'</style></head><body><div class="screen">Canon packing slips — choose Canon and confirm in Android. <button onclick="printIfFits()">Print on Canon</button></div><div id="overflow-warning" class="overflow-warning"></div>'+pages+'<script>'+startup+'<\/script></body></html>';
 }
-// The main action prints MUNBYN labels over BLE and prepares only Canon PDFs.
+// Print labels completely before requesting the Canon system print dialog.
+// Never open a separate browser tab: this steals focus from active Web Bluetooth.
+let canonFrame=null;
+function canonPrintInPlace(orders){
+ if(canonFrame){canonFrame.remove();canonFrame=null}
+ canonFrame=document.createElement("iframe");
+ canonFrame.id="piko-canon-frame";
+ canonFrame.setAttribute("title","Canon packing slip print job");
+ // Positioned outside the visible screen but rendered at the physical page size.
+ Object.assign(canonFrame.style,{position:"fixed",left:"-2000px",top:"0",width:"816px",height:"1056px",border:"0",opacity:"0",pointerEvents:"none"});
+ const html=canonSlipHtml(orders,state.settings)
+  .replace('window.addEventListener("load",()=>setTimeout(()=>{try{printIfFits()}catch(e){}},300));',"");
+ const attempt=()=>{
+  try{
+   const printWindow=canonFrame.contentWindow;
+   const printDoc=canonFrame.contentDocument;
+   if(!printWindow||!printDoc)throw Error("Canon print frame unavailable.");
+   if(printDoc.readyState==="loading"){
+     setTimeout(attempt,100);return;
+   }
+   // Verify the 1-page layout before asking Android to print.
+   const columns=[...printDoc.querySelectorAll(".item-column")];
+   const grid=printDoc.querySelector(".items-grid");
+   if(!grid)throw Error("Packing slip layout unavailable.");
+   const allGrids=[...printDoc.querySelectorAll(".items-grid")];
+   for(const g of allGrids){
+     const cols=[...g.querySelectorAll(".item-column")];
+     for(const size of ["7.2pt","6.8pt","6.4pt","6.0pt"]){
+       if(cols.every(c=>c.scrollHeight<=g.clientHeight+2))break;
+       g.style.fontSize=size;
+     }
+     if(cols.some(c=>c.scrollHeight>g.clientHeight+2))throw Error("Packing slip exceeds one page. Reduce listing title lengths.");
+   }
+   printWindow.focus();
+   printWindow.print();
+   statusCanon("Android Canon print dialog requested. Confirm printing on the Canon.","info");
+  }catch(error){
+   statusCanon("Could not open the Canon print dialog automatically: "+error.message+". Use Open packing slips.","warning");
+  }
+ };
+ canonFrame.onload=()=>setTimeout(attempt,140);
+ canonFrame.srcdoc=html;
+ document.body.appendChild(canonFrame);
+}
+function statusCanon(message,type="info"){
+ $("ready").textContent=message;
+ $("ready").dataset.status=type;
+}
 $("print").onclick=async()=>{
  const orders=state.orders.filter(o=>state.selected.has(o.id));
  const needLabels=state.docs.labels,needPacking=state.docs.packing;
  if(!orders.length||(!needLabels&&!needPacking)||state.working||state.directBusy)return;
- if(needLabels&&orders.length>25){toast("MUNBYN supports at most 25 orders per batch.");return}
- // Start Bluetooth chooser directly in the click gesture if necessary.
+ if(needLabels&&orders.length>25){toast("MUNBYN supports a maximum of 25 orders per batch.");return}
+ // Start the Bluetooth chooser synchronously from the button click if needed.
  const connection=needLabels?(isPrinterConnected()?Promise.resolve():connectPrinter()):Promise.resolve();
- // Android blocks window.open after an await. Reserve the Canon tab NOW using
- // this same click, then put the PDF in it when generated.
- let canonTab=null;
- if(needPacking){
-   canonTab=window.open("about:blank","_blank");
-   if(canonTab){
-     canonTab.document.open();
-     canonTab.document.write(canonSlipHtml(orders,state.settings));
-     canonTab.document.close();
-   }
- }
  state.working=true;updatePrintControls();
- let labelSent=false,packingUrl=null;
+ let labelSent=false;
  try{
-  // Start fetching Canon PDF in parallel; retain popup from original gesture.
-  const packingTask=needPacking?fetch("/api/documents/packing",{
-   method:"POST",credentials:"same-origin",headers:{"Content-Type":"application/json"},
-   body:JSON.stringify({orders,settings:state.settings})
-  }).then(async r=>{
-   if(!r.ok){const error=await r.json().catch(()=>({}));throw Error(error.error||"Unable to prepare Canon packing slip")}
-   return URL.createObjectURL(await r.blob());
-  }):null;
-  if(needLabels){
-   await connection;
-   bluetoothStatus("Sending "+(orders.length*2)+" address labels directly to MUNBYN…");
-   await printOrders(orders,state.settings);
-   labelSent=true;
-  }
-  if(needPacking){
-   packingUrl=await packingTask;
-   state.urls.forEach(URL.revokeObjectURL);state.urls=[packingUrl];
-   $("packing-link").classList.remove("hidden");$("packing-link").href=packingUrl;
-   $("labels-link").classList.add("hidden");$("labels-link").removeAttribute("href");
-   // Canon printing was requested by the HTML popup from the original click.
-   // The generated PDF is retained as backup rather than replacing that tab.
-   $("ready").textContent=(labelSent?orders.length*2+" MUNBYN labels transmitted. ":"")+
-     "Canon print dialog "+(canonTab?"requested automatically.":"could not open; use PDF backup.")+
-     " Confirm printing on Canon in Android.";
-   $("modal").classList.remove("hidden");
-  }else toast(orders.length*2+" labels transmitted to MUNBYN. Check printed addresses.");
- }catch(e){
-  const message=e?.message||"Printing failed";
-  if(canonTab&&!canonTab.closed&&!packingUrl)canonTab.close();
-  bluetoothStatus(message,"error");toast(message);
+   if(needLabels){
+     await connection;
+     bluetoothStatus("Printing address labels on MUNBYN. Keep Piko open until finished…");
+     await printOrders(orders,state.settings);
+     labelSent=true;
+   }
+   if(needPacking){
+     // Prepare the PDF backup only after the BLE job is no longer active.
+     const response=await fetch("/api/documents/packing",{
+       method:"POST",credentials:"same-origin",
+       headers:{"Content-Type":"application/json"},
+       body:JSON.stringify({orders,settings:state.settings})
+     });
+     if(!response.ok){
+       const detail=await response.json().catch(()=>({}));
+       throw Error(detail.error||"Could not prepare Canon packing slip.");
+     }
+     const backup=URL.createObjectURL(await response.blob());
+     state.urls.forEach(URL.revokeObjectURL);state.urls=[backup];
+     $("packing-link").href=backup;$("packing-link").classList.remove("hidden");
+     $("labels-link").classList.add("hidden");
+     statusCanon((labelSent?orders.length*2+" MUNBYN labels transmitted. ":"")+
+       "Requesting the Canon print dialog on this page. You may need to confirm printing.");
+     $("modal").classList.remove("hidden");
+     canonPrintInPlace(orders);
+   }else toast(orders.length*2+" MUNBYN labels transmitted. Check that every address line printed.");
+ }catch(error){
+   const message=error?.message||"Printing failed.";
+   bluetoothStatus(message,"error");
+   toast(message);
  }finally{state.working=false;updatePrintControls()}
 };
 
