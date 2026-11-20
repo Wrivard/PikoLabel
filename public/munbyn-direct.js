@@ -19,7 +19,52 @@ export function disconnectPrinter(){
  if(old?.gatt?.connected)old.gatt.disconnect();
  report("Disconnected and forgotten on this browser. Tap Connect to authorize again.");
 }
-async function openGatt(selected){
+// On some Chrome/Android versions, getDevices() returns a previously authorized
+// printer but the cached device cannot reconnect until it advertises again.
+// Watch advertisements when supported, with a short timeout and clean cancellation.
+export async function waitForPrinterAdvertisement(selected,timeoutMs=6500){
+ if(typeof selected?.watchAdvertisements!=="function")return false;
+ const controller=new AbortController();
+ let onAdvertisement=()=>{};
+ const advertisement=new Promise(resolve=>{
+   onAdvertisement=()=>resolve(true);
+   selected.addEventListener("advertisementreceived",onAdvertisement,{once:true});
+ });
+ try{
+   await selected.watchAdvertisements({signal:controller.signal});
+   return await Promise.race([advertisement,delay(timeoutMs).then(()=>false)]);
+ }catch{return false}
+ finally{
+   controller.abort();
+   selected.removeEventListener?.("advertisementreceived",onAdvertisement);
+ }
+}
+function isOutOfRangeError(error){
+ return /no longer in range|out of range/i.test(String(error?.message||""));
+}
+async function connectGatt(selected,{recover=false}={}){
+ const limit=recover?3:1;
+ let last;
+ for(let attempt=0;attempt<limit;attempt++){
+   if(manualStop)throw Error("Bluetooth connection was cancelled.");
+   if(attempt>0)report("Retrying MUNBYN Bluetooth connection ("+(attempt+1)+"/"+limit+")…");
+   try{return selected.gatt.connected?selected.gatt:await selected.gatt.connect()}
+   catch(e){
+     last=e;
+     if(!recover||!isOutOfRangeError(e)||attempt===limit-1)break;
+     if(attempt===0){
+       report("Chrome found your saved MUNBYN but cannot reach it yet. Checking Bluetooth advertisements…","warning");
+       const seen=await waitForPrinterAdvertisement(selected);
+       if(!seen)await delay(1400);
+     }else await delay(2000);
+   }
+ }
+ if(recover&&isOutOfRangeError(last)){
+   throw new Error("Chrome remembered the printer but Android could not restore its Bluetooth link. Turn the MUNBYN off and on, close MUNBYN Print, then tap Re-select MUNBYN. Chrome may still require manual reconnect after a reload.");
+ }
+ throw last;
+}
+async function openGatt(selected,{recover=false}={}){
  if(isPrinterConnected()&&device?.id===selected.id)return selected.name||"MUNBYN";
  if(connectionPromise)return connectionPromise;
  manualStop=false;
@@ -32,7 +77,7 @@ async function openGatt(selected){
  });
  connectionPromise=(async()=>{
    report("Connecting to "+(selected.name||"MUNBYN")+"…");
-   const server=await selected.gatt.connect();
+   const server=await connectGatt(selected,{recover});
    let characteristic=null;
    // GATT objects must be rediscovered after every connection.
    for(const n of services){
@@ -71,7 +116,7 @@ export async function reconnectRememberedPrinter(){
  // Within the same open tab, re-use the live BluetoothDevice object even when
  // experimental persistent permissions are unavailable.
  if(device?.gatt&&!device.gatt.connected){
-   try{await openGatt(device);return true}
+   try{await openGatt(device,{recover:true});return true}
    catch(e){report("Reconnecting saved device in this tab failed: "+(e?.message||"Unknown error"),"warning")}
  }
  if(typeof navigator.bluetooth.getDevices!=="function"){
@@ -92,9 +137,9 @@ export async function reconnectRememberedPrinter(){
      return false;
    }
    report("Restoring your saved MUNBYN Bluetooth connection…");
-   await openGatt(selected);return true;
+   await openGatt(selected,{recover:true});return true;
  }catch(e){
-   report("Could not reconnect automatically: "+(e?.message||"unknown error")+". Tap Connect to retry.","warning");
+   report("Automatic reconnect unsuccessful: "+(e?.message||"unknown error"),"warning");
    return false;
  }
 }

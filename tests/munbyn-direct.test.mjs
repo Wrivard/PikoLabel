@@ -84,3 +84,36 @@ test("reconnect reuses a cached device within same tab when getDevices is unavai
    assert.equal(mod.isPrinterConnected(),true);
  }finally{Object.defineProperty(globalThis,"navigator",{configurable:true,value:oldN});globalThis.localStorage=oldS}
 });
+
+test("out-of-range error is recovered using an advertisement and retry",async()=>{
+ const mod=await import("../public/munbyn-direct.js?range-retry");
+ const oldN=globalThis.navigator,oldS=globalThis.localStorage;
+ const store=new Map([["piko-munbyn-device-id","m1"]]),handlers=new Map();
+ let calls=0,scans=0;
+ const characteristic={properties:{write:true},async writeValueWithResponse(){}};
+ const dev={id:"m1",name:"MUNBYN ITPP130B",gatt:{
+   connected:false,
+   async connect(){
+     calls++;
+     if(calls===1)throw new Error("Bluetooth Device is no longer in range.");
+     this.connected=true;return this;
+   },
+   async getPrimaryService(){return {async getCharacteristic(){return characteristic}}},
+   disconnect(){this.connected=false}
+ },addEventListener(n,fn){handlers.set(n,fn)},removeEventListener(n){handlers.delete(n)},
+ async watchAdvertisements(){
+   scans++;
+   queueMicrotask(()=>handlers.get("advertisementreceived")?.());
+ }};
+ Object.defineProperty(globalThis,"navigator",{configurable:true,value:{bluetooth:{async getDevices(){return [dev]}}}});
+ globalThis.localStorage={getItem:k=>store.get(k)||null,setItem:(k,v)=>store.set(k,v),removeItem:k=>store.delete(k)};
+ try{
+   assert.equal(await mod.reconnectRememberedPrinter(),true);
+   assert.equal(mod.isPrinterConnected(),true);
+   assert.equal(calls,2);
+   assert.equal(scans,1);
+ }finally{
+   Object.defineProperty(globalThis,"navigator",{configurable:true,value:oldN});
+   globalThis.localStorage=oldS;
+ }
+});
