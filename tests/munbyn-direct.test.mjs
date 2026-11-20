@@ -129,3 +129,23 @@ test("long addresses must fit before a label is sent",async()=>{
  const {layoutAddress}=await import("../public/munbyn-direct.js");
  assert.throws(()=>layoutAddress(Array.from({length:20},()=> "Some lengthy address line"),457,254),/does not fit/);
 });
+
+test("bitmap encoder omits white rows and columns without dropping text pixels",async()=>{
+ const {encodeTspl}=await import("../public/munbyn-direct.js");
+ const width=58,height=90,bytes=new Uint8Array(width*height).fill(255);
+ for(let y=10;y<15;y++)for(let x=5;x<11;x++)bytes[y*width+x]=0;
+ for(let y=60;y<64;y++)for(let x=19;x<28;x++)bytes[y*width+x]=0;
+ const command=encodeTspl({bytes,stride:width,height},2.25,1.25);
+ const string=new TextDecoder("latin1").decode(command);
+ assert.ok(string.includes("BITMAP 40,10,6,5,0,"));
+ assert.ok(string.includes("BITMAP 152,60,9,4,0,"));
+ assert.ok(string.endsWith("PRINT 1,1\r\n"));
+ assert.ok(command.length<450,"should omit large blank bitmap regions");
+});
+test("blank bitmap still emits one valid label print command",async()=>{
+ const {encodeTspl}=await import("../public/munbyn-direct.js");
+ const output=encodeTspl({bytes:new Uint8Array(58*40).fill(255),stride:58,height:40},2.25,1.25);
+ const str=new TextDecoder().decode(output);
+ assert.ok(!str.includes("BITMAP"));
+ assert.ok(str.includes("PRINT 1,1"));
+});

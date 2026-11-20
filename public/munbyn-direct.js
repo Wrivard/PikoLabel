@@ -159,14 +159,30 @@ export function rgbaToBitmap(rgba,width,height){
  return {bytes:output,stride,height};
 }
 function concat(parts){const size=parts.reduce((n,x)=>n+x.length,0),out=new Uint8Array(size);let i=0;for(const p of parts){out.set(p,i);i+=p.length;}return out;}
+// Generate narrow bitmap stripes for only pixels with ink. A full, mostly-white
+// 2.25 x 1.25 inch label would otherwise require thousands of BLE writes.
 export function encodeTspl(bitmap,widthIn,heightIn){
+ if(!bitmap||!(bitmap.bytes instanceof Uint8Array)||bitmap.stride<1||bitmap.height<1||bitmap.bytes.length<bitmap.stride*bitmap.height)throw Error("Invalid label bitmap");
  const header=TE.encode("SIZE "+(widthIn*25.4).toFixed(2)+" mm,"+(heightIn*25.4).toFixed(2)+" mm\r\nGAP 3 mm,0 mm\r\nDIRECTION 0,0\r\nREFERENCE 0,0\r\nCLS\r\n");
  const parts=[header];
- for(let y=0;y<bitmap.height;y+=16){
-   const rows=Math.min(16,bitmap.height-y);
-   parts.push(TE.encode("BITMAP 0,"+y+","+bitmap.stride+","+rows+",0,"));
-   parts.push(bitmap.bytes.subarray(y*bitmap.stride,(y+rows)*bitmap.stride));
-   parts.push(TE.encode("\r\n"));
+ const ink=[];
+ for(let y=0;y<bitmap.height;y++){
+  let min=bitmap.stride,max=-1;
+  for(let x=0;x<bitmap.stride;x++)if(bitmap.bytes[y*bitmap.stride+x]!==255){min=Math.min(min,x);max=x}
+  ink.push({min,max});
+ }
+ // Group neighboring rows with ink; do not transmit blank rows. Keep each
+ // stripe at most 6 rows, and crop each stripe to its ink's bounding columns.
+ for(let y=0;y<bitmap.height;){
+  if(ink[y].max<0){y++;continue}
+  const from=y;
+  let min=bitmap.stride,max=0;
+  while(y<bitmap.height&&ink[y].max>=0&&y-from<6){min=Math.min(min,ink[y].min);max=Math.max(max,ink[y].max);y++}
+  const rows=y-from,width=max-min+1,pixels=new Uint8Array(rows*width);
+  for(let dy=0;dy<rows;dy++)pixels.set(bitmap.bytes.subarray((from+dy)*bitmap.stride+min,(from+dy)*bitmap.stride+max+1),dy*width);
+  parts.push(TE.encode("BITMAP "+(min*8)+","+from+","+width+","+rows+",0,"));
+  parts.push(pixels);
+  parts.push(TE.encode("\r\n"));
  }
  parts.push(TE.encode("PRINT 1,1\r\n"));
  return concat(parts);
@@ -248,26 +264,34 @@ export function pagesForOrder(order,settings){
 export function testPage(settings){
  return renderArial("PIKO TEST",["Bluetooth test","Arial original font","Check all lines"],Number(settings.labelWidth)||2.25,Number(settings.labelHeight)||1.25);
 }
+// Each BLE write is acknowledged before continuing; errors stop the batch.
 export async function printPages(pages,settings){
  if(busy)throw Error("Another print job is active.");
  if(!isPrinterConnected())throw Error("Connect MUNBYN Bluetooth first.");
- if(pages.length===0||pages.length>50)throw Error("Select 1-25 orders");
- busy=true;let attempted=false;
+ if(!Array.isArray(pages)||pages.length===0||pages.length>50)throw Error("Select 1-25 orders.");
+ const jobs=pages.map(page=>page.bytes||encodeTspl(page,Number(settings.labelWidth)||2.25,Number(settings.labelHeight)||1.25));
+ busy=true;
+ let attempted=false;
  try{
-  for(let i=0;i<pages.length;i++){
-   const data=pages[i].bytes||encodeTspl(pages[i],Number(settings.labelWidth)||2.25,Number(settings.labelHeight)||1.25);
-   report("Sending label "+(i+1)+" of "+pages.length+"...");
-   for(let pos=0;pos<data.length;pos+=20){
-    if(!isPrinterConnected())throw Error("MUNBYN disconnected");
+  for(let i=0;i<jobs.length;i++){
+   const bytes=jobs[i];
+   report("Sending MUNBYN label "+(i+1)+"/"+jobs.length+" ("+bytes.length+" bytes)…");
+   // 20-byte writes work on BLE connections with the default minimum MTU.
+   for(let pos=0;pos<bytes.length;pos+=20){
+    if(!isPrinterConnected())throw Error("MUNBYN Bluetooth disconnected. Check paper before retrying.");
     attempted=true;
-    await writer.writeValueWithResponse(data.subarray(pos,Math.min(pos+20,data.length)));
-    await delay(22);
+    await writer.writeValueWithResponse(bytes.subarray(pos,Math.min(pos+20,bytes.length)));
+    if(pos%600===0)report("Sending MUNBYN label "+(i+1)+"/"+jobs.length+": "+Math.round(100*pos/bytes.length)+"%…");
+    await delay(16);
    }
-   await delay(1300);
+   report("Label "+(i+1)+"/"+jobs.length+" transmitted; letting MUNBYN feed paper.");
+   await delay(1500);
   }
-  report(pages.length+" label(s) transmitted. Confirm each address line printed.","success");
- }catch(e){report((attempted?"Part of the job may have printed; check paper before retrying. ":"")+e.message,"error");throw e}
- finally{busy=false}
+  report("All "+jobs.length+" MUNBYN labels transmitted. Confirm the addresses on the paper.","success");
+ }catch(error){
+  report((attempted?"Printing may be partial; check paper before retrying. ":"")+error.message,"error");
+  throw error;
+ }finally{busy=false}
 }
 export async function printOrders(orders,settings){
  if(!orders.length||orders.length>25)throw Error("Select between 1 and 25 orders.");
