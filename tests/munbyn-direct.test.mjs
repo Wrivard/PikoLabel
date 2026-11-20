@@ -186,3 +186,32 @@ test("compact serif raster test omits blank rows and retains ink",async()=>{
  assert.ok(body.endsWith("PRINT 1,1\r\n"));
  assert.ok(cmd.length<300);
 });
+
+test("main order printing and sample use the same Word-style raster renderer",async()=>{
+ const module=await import("../public/munbyn-direct.js");
+ const prevDocument=globalThis.document;
+ const fonts=[],drawn=[];
+ const context={
+  font:"",fillStyle:"",textBaseline:"",
+  fillRect(){},fillText(text){drawn.push({text,font:this.font})},
+  measureText(text){fonts.push(this.font);return {width:String(text).length*12}},
+  getImageData(x,y,w,h){
+    const data=new Uint8ClampedArray(w*h*4);
+    data.fill(255);data[0]=0;data[1]=0;data[2]=0;return {data};
+  }
+ };
+ globalThis.document={createElement(){return {getContext(){return context}}}};
+ const settings={labelWidth:2.25,labelHeight:1.25,returnName:"William Rivard",
+   returnAddress:{line1:"340 rue huard",cityStatePostal:"Sorel-Tracy QC J3P 6E1",country:"Canada"}};
+ const order={shipTo:{name:"Justin Ritchie",line1:"PO Box 1256",cityStatePostal:"Indian Head SK S0G 2K0",country:"Canada"}};
+ try{
+  const sample=module.wordStyleFontTest(settings);
+  const labels=module.wordStylePagesForOrder(order,settings);
+  assert.equal(sample.renderer,"word-serif");
+  assert.equal(labels.length,2);
+  assert.ok(labels.every(label=>label.renderer===sample.renderer));
+  assert.ok(drawn.some(x=>x.text==="Justin Ritchie"));
+  assert.ok(drawn.some(x=>x.text==="William Rivard"));
+  assert.ok(drawn.every(x=>x.font.includes("Times New Roman")));
+ }finally{globalThis.document=prevDocument}
+});

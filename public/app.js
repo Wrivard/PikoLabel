@@ -1,4 +1,4 @@
-import {connectPrinter,reconnectRememberedPrinter,disconnectPrinter,isPrinterConnected,webBluetoothSupported,setPrinterStatusListener,testPage,wordStyleFontTest,printPages,printOrders} from "./munbyn-direct.js";
+import {connectPrinter,reconnectRememberedPrinter,disconnectPrinter,isPrinterConnected,webBluetoothSupported,setPrinterStatusListener,wordStyleFontTest,printPages,printOrders} from "./munbyn-direct.js";
 const $=id=>document.getElementById(id),state={orders:[],selected:new Set(),settings:{},auth:{},demo:true,view:"label",urls:[],docs:{packing:true,labels:true},previewUrl:null,previewSeq:0,previewTimer:null,screen:"orders"};const esc=s=>String(s??"").replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));const money=v=>v?.value!=null?Number(v.value).toFixed(2)+" "+(v.currency||"CAD"):"";const qty=o=>(o.items||[]).reduce((n,i)=>n+Number(i.quantity||0),0);const toast=message=>{$("toast").textContent=message;setTimeout(()=>$("toast").textContent="",4000)};
 async function call(path,options={}){const r=await fetch("/api/"+path,{credentials:"same-origin",headers:{"Content-Type":"application/json"},...options}),t=r.headers.get("content-type")||"",v=t.includes("json")?await r.json():await r.text();if(!r.ok)throw Error(v.error||"Request failed");return v}
 const addr=(name,a)=>[name,a?.line1,a?.line2,a?.cityStatePostal,a?.country].filter(Boolean).map(esc).join("<br>");
@@ -267,7 +267,7 @@ $("test-munbyn").onclick=()=>testPrinter("label");
 // BLE only: Android's system print destination list cannot connect to this proprietary printer.
 function bluetoothStatus(message,type="info"){
  for(const id of ["bluetooth-status","direct-print-status"]){$(id).textContent=message;$(id).dataset.status=type;}
- $("direct-test").disabled=!isPrinterConnected()||state.directBusy;$("word-font-test").disabled=!isPrinterConnected()||state.directBusy;
+ $("direct-test").disabled=!isPrinterConnected()||state.directBusy;
  $("direct-disconnect").disabled=!isPrinterConnected()||state.directBusy;
  $("direct-connect").textContent=isPrinterConnected()?"MUNBYN connected ✓":"Connect MUNBYN Bluetooth";
  $("direct-print").disabled=!state.selected.size||state.directBusy||state.working;
@@ -281,16 +281,8 @@ $("direct-connect").onclick=directConnect;
 $("direct-disconnect").onclick=()=>{try{disconnectPrinter()}catch(e){bluetoothStatus(e.message,"error")}};
 $("direct-test").onclick=async()=>{
  state.directBusy=true;updatePrintControls();bluetoothStatus("Preparing one calibration label…");
- try{await printPages([testPage(state.settings)],state.settings)}
+ try{await printPages([wordStyleFontTest(state.settings)],state.settings)}
  catch(e){bluetoothStatus(e.message,"error")}
- finally{state.directBusy=false;updatePrintControls()}
-};
-$("word-font-test").onclick=async()=>{
- state.directBusy=true;updatePrintControls();
- try{
-   await printPages([wordStyleFontTest(state.settings)],state.settings);
-   bluetoothStatus("Serif font sample sent as image. Check the label. Real order printing is unchanged.","success");
- }catch(e){bluetoothStatus(e.message,"error")}
  finally{state.directBusy=false;updatePrintControls()}
 };
 $("direct-print").onclick=async()=>{

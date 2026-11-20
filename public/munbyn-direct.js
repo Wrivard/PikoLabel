@@ -272,23 +272,50 @@ export function encodeInkOnlyTspl(bitmap,w,h){
  parts.push(TE.encode("PRINT 1,1\r\n"));
  return concat(parts);
 }
-export function wordStyleFontTest(settings){
+
+/** The original Word-style font renderer, shared by the test and real orders.
+ * The ITPP130B does not reliably render externally requested TTF text.
+ * Rasterizing the actual glyphs and sending only ink rows retains the font.
+ */
+export function renderWordStyleLabel(title,addressLines,settings){
  const w=Number(settings.labelWidth)||2.25,h=Number(settings.labelHeight)||1.25;
  const width=Math.round(w*DPI),height=Math.round(h*DPI);
- if(width<440||height<250)throw Error("Label size too small");
- const canvas=document.createElement("canvas");canvas.width=width;canvas.height=height;
+ if(width<440||height<250||width>875||height>1259)throw Error("Invalid label dimensions.");
+ if(typeof document==="undefined")throw Error("Browser canvas required for Word-style fonts.");
+ const canvas=document.createElement("canvas");
+ canvas.width=width;canvas.height=height;
  const ctx=canvas.getContext("2d",{willReadFrequently:true});
- const font='Georgia, "Noto Serif", "Times New Roman", serif';
- const lines=["William Rivard","340 rue huard","Sorel-Tracy QC J3P 6E1","Canada"];
- const layout=layoutAddressCentered(lines,width,height,(text,size)=>{ctx.font=size+"px "+font;return ctx.measureText(text).width;});
- ctx.fillStyle="white";ctx.fillRect(0,0,width,height);
- ctx.fillStyle="black";ctx.textBaseline="top";
- ctx.font="bold 27px "+font;ctx.fillText("Ship from",layout.x,layout.y);
+ if(!ctx)throw Error("Canvas not available.");
+ const font='"Times New Roman", "Noto Serif", Georgia, serif';
+ const layout=layoutAddressCentered(addressLines,width,height,(text,size)=>{
+  ctx.font=size+"px "+font;
+  return ctx.measureText(text).width;
+ });
+ ctx.fillStyle="#fff";
+ ctx.fillRect(0,0,width,height);
+ ctx.fillStyle="#000";
+ ctx.textBaseline="top";
+ ctx.font="bold 27px "+font;
+ ctx.fillText(title,layout.x,layout.y);
  ctx.font=layout.size+"px "+font;
  let y=layout.y+layout.headingHeight+layout.gap;
- for(const line of layout.rows){ctx.fillText(line,layout.x,y);y+=layout.lineHeight;}
+ for(const row of layout.rows){ctx.fillText(row,layout.x,y);y+=layout.lineHeight;}
  const bitmap=rgbaToBitmap(ctx.getImageData(0,0,width,height).data,width,height);
- return {bytes:encodeInkOnlyTspl(bitmap,w,h),font,layout};
+ const bytes=encodeInkOnlyTspl(bitmap,w,h);
+ return {bytes,renderer:"word-serif",font,layout};
+}
+export function wordStylePagesForOrder(order,settings){
+ const sender=rowsOf(settings.returnName,settings.returnAddress);
+ const recipient=rowsOf(order.shipTo?.name,order.shipTo);
+ if(sender.length<3||recipient.length<3)throw Error("Return or recipient address incomplete; no labels sent.");
+ return [
+  renderWordStyleLabel("Ship from",sender,settings),
+  renderWordStyleLabel("Ship to",recipient,settings)
+ ];
+}
+export function wordStyleFontTest(settings){
+ return renderWordStyleLabel("Ship from",
+  ["William Rivard","340 rue huard","Sorel-Tracy QC J3P 6E1","Canada"],settings);
 }
 export function testPage(settings){
  return encodeReliableLabel("PIKO TEST",["Bluetooth test","Clear native font","Centered text"],Number(settings.labelWidth)||2.25,Number(settings.labelHeight)||1.25);
@@ -392,6 +419,6 @@ export function reliablePagesForOrder(order,settings){
 }
 export async function printOrders(orders,settings){
  if(!orders.length||orders.length>25)throw Error("Select between 1 and 25 orders.");
- const pages=orders.flatMap(o=>reliablePagesForOrder(o,settings)); // compact, proven BLE text protocol
+ const pages=orders.flatMap(o=>wordStylePagesForOrder(o,settings)); // SAME original Word-style renderer as test label
  await printPages(pages,settings);
 }
