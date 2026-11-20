@@ -11,7 +11,7 @@ async function initialize(){try{state.auth=await call("bootstrap");$("login").cl
     Object.assign(state.settings,{labelWidth:2.25,labelHeight:1.25,labelGap:0,labelMargin:.14,labelFont:10,labelBorder:false,labelProfile:"word"});
   } else if(stored.labelProfile==="word" && Number(stored.labelWidth)===4){
     Object.assign(state.settings,{labelWidth:2.25,labelHeight:1.25,labelGap:0,labelMargin:.14,labelFont:10,labelBorder:false,labelProfile:"word"});
-  }try{state.docs={packing:true,labels:true,...JSON.parse(localStorage.getItem("piko-doc-choices")||"{}")}}catch{};$("include-packing").checked=state.docs.packing;$("include-labels").checked=state.docs.labels;$("direct-print").disabled=!count||busy||state.directBusy;populate();$("business-saved").textContent="Changes save automatically on this browser (not across devices).";await reload()}catch(e){toast(e.message)}}
+  }try{state.docs={packing:true,labels:true,...JSON.parse(localStorage.getItem("piko-doc-choices")||"{}")}}catch{};$("include-packing").checked=state.docs.packing;$("include-labels").checked=state.docs.labels;populate();$("business-saved").textContent="Changes save automatically on this browser (not across devices).";await reload()}catch(e){toast(e.message)}}
 function populate(){const s=state.settings,a=s.returnAddress||{};for(const [id,v] of Object.entries({storeName:s.storeName,returnName:s.returnName,line1:a.line1,line2:a.line2,cityStatePostal:a.cityStatePostal,country:a.country,thanks:s.thankYouMessage,width:s.labelWidth,height:s.labelHeight,font:s.labelFont,gap:s.labelGap}))$(id).value=v??"";$("border").checked=s.labelBorder!==false;$("labelPreset").value=s.labelProfile||((Number(s.labelWidth)===2.25&&Number(s.labelHeight)===1.25)?"word":"custom");$("connect").innerHTML=state.auth.connected?'<button id="disconnect" class="ghost">Disconnect eBay</button>':state.auth.ebayConfigured?'<a href="/api/oauth/start">Connect eBay →</a>':'<p>To connect real orders, add EBAY_CLIENT_ID, EBAY_CLIENT_SECRET, EBAY_RUNAME, APP_PASSWORD and APP_SECRET in Vercel settings.</p>';if($("disconnect"))$("disconnect").onclick=async()=>{await call("disconnect",{method:"POST"});location.reload()}}
 async function reload(){try{let result=await call("orders");state.orders=result.orders;state.demo=result.demo;$("status").textContent=result.demo?"Demo mode":"eBay connected";$("status").className="pill "+(result.demo?"":"live");state.selected=new Set([...state.selected].filter(id=>state.orders.some(o=>o.id===id)));render()}catch(e){toast(e.message)}}
 const filtered=()=>state.orders.filter(o=>JSON.stringify(o).toLowerCase().includes($("search").value.toLowerCase()));
@@ -26,6 +26,7 @@ function updatePrintControls(){
  $("tablet-print").textContent=busy?"Working…":(state.docs.labels?"Print →":"Prepare →");$("tablet-print").disabled=!count||!active||busy||state.directBusy;
  $("dock-orders").textContent=count+" order"+(count===1?"":"s")+" selected";$("dock-docs").textContent=active?type:"Select at least one document";
  $("include-packing").checked=state.docs.packing;$("include-labels").checked=state.docs.labels;
+ $("direct-print").disabled=!count||busy||state.directBusy;
 }
 function queuePreview(){
  clearTimeout(state.previewTimer);
