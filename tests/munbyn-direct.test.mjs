@@ -175,11 +175,14 @@ test("both labels are generated as lightweight independent jobs",async()=>{
  assert.ok(recipient.includes("PO Box 1256"));
 });
 
-test("experimental Word-style font trial is compact and contains no buyer address",async()=>{
- const {wordStyleFontTest}=await import("../public/munbyn-direct.js");
- const page=wordStyleFontTest({labelWidth:2.25,labelHeight:1.25});
- const out=Array.from(page.bytes,x=>String.fromCharCode(x)).join("");
- assert.ok(out.includes('"ROMAN.TTF"'));
- assert.ok(out.includes("PRINT 1,1"));
- assert.ok(page.bytes.length<700);
+
+test("compact serif raster test omits blank rows and retains ink",async()=>{
+ const {encodeInkOnlyTspl}=await import("../public/munbyn-direct.js");
+ const data=new Uint8Array(58*100).fill(255);
+ for(let y=12;y<18;y++)for(let x=9;x<20;x++)data[y*58+x]=0;
+ const cmd=encodeInkOnlyTspl({bytes:data,stride:58,height:100},2.25,1.25);
+ const body=new TextDecoder("latin1").decode(cmd);
+ assert.ok(body.includes("BITMAP 72,12,11,6,0,"));
+ assert.ok(body.endsWith("PRINT 1,1\r\n"));
+ assert.ok(cmd.length<300);
 });

@@ -289,7 +289,7 @@ $("word-font-test").onclick=async()=>{
  state.directBusy=true;updatePrintControls();
  try{
    await printPages([wordStyleFontTest(state.settings)],state.settings);
-   bluetoothStatus("Font sample transmitted. Check whether readable serif lettering printed on the paper.","success");
+   bluetoothStatus("Serif font sample sent as image. Check the label. Real order printing is unchanged.","success");
  }catch(e){bluetoothStatus(e.message,"error")}
  finally{state.directBusy=false;updatePrintControls()}
 };

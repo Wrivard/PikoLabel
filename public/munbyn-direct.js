@@ -251,20 +251,44 @@ export function pagesForOrder(order,settings){
 }
 
 /** TSPL2 ROMAN.TTF trial; no customer details or raster bitmap transfer. */
+
+export function encodeInkOnlyTspl(bitmap,w,h){
+ const parts=[TE.encode("SIZE "+(w*25.4).toFixed(2)+" mm,"+(h*25.4).toFixed(2)+" mm\r\nGAP 3 mm,0 mm\r\nDIRECTION 0,0\r\nCLS\r\n")];
+ for(let y=0;y<bitmap.height;){
+  let lo=bitmap.stride,hi=-1;
+  for(let x=0;x<bitmap.stride;x++)if(bitmap.bytes[y*bitmap.stride+x]!==255){lo=Math.min(lo,x);hi=x;}
+  if(hi<0){y++;continue;}
+  const start=y;let min=lo,max=hi;
+  while(y<bitmap.height&&y-start<6){
+   let has=false;
+   for(let x=0;x<bitmap.stride;x++)if(bitmap.bytes[y*bitmap.stride+x]!==255){min=Math.min(min,x);max=Math.max(max,x);has=true;}
+   if(!has)break;
+   y++;
+  }
+  const rows=y-start,stride=max-min+1,chunk=new Uint8Array(rows*stride);
+  for(let j=0;j<rows;j++)chunk.set(bitmap.bytes.subarray((start+j)*bitmap.stride+min,(start+j)*bitmap.stride+max+1),j*stride);
+  parts.push(TE.encode("BITMAP "+min*8+","+start+","+stride+","+rows+",0,"),chunk,TE.encode("\r\n"));
+ }
+ parts.push(TE.encode("PRINT 1,1\r\n"));
+ return concat(parts);
+}
 export function wordStyleFontTest(settings){
  const w=Number(settings.labelWidth)||2.25,h=Number(settings.labelHeight)||1.25;
- if(w<2.2||h<1.25)throw Error("Invalid label size");
- const cmds=[
-  "SIZE "+(w*25.4).toFixed(2)+" mm,"+(h*25.4).toFixed(2)+" mm",
-  "GAP 3 mm,0 mm","DIRECTION 0,0","REFERENCE 0,0","CODEPAGE 1252","CLS",
-  'TEXT 24,16,"ROMAN.TTF",0,23,23,"Ship from"',
-  'TEXT 24,60,"ROMAN.TTF",0,23,23,"William Rivard"',
-  'TEXT 24,98,"ROMAN.TTF",0,23,23,"340 rue huard"',
-  'TEXT 24,136,"ROMAN.TTF",0,23,23,"Sorel-Tracy QC"',
-  'TEXT 24,174,"ROMAN.TTF",0,23,23,"Canada"',
-  "PRINT 1,1"
- ];
- return {bytes:codepage1252(cmds.join("\r\n")+"\r\n")};
+ const width=Math.round(w*DPI),height=Math.round(h*DPI);
+ if(width<440||height<250)throw Error("Label size too small");
+ const canvas=document.createElement("canvas");canvas.width=width;canvas.height=height;
+ const ctx=canvas.getContext("2d",{willReadFrequently:true});
+ const font='Georgia, "Noto Serif", "Times New Roman", serif';
+ const lines=["William Rivard","340 rue huard","Sorel-Tracy QC J3P 6E1","Canada"];
+ const layout=layoutAddressCentered(lines,width,height,(text,size)=>{ctx.font=size+"px "+font;return ctx.measureText(text).width;});
+ ctx.fillStyle="white";ctx.fillRect(0,0,width,height);
+ ctx.fillStyle="black";ctx.textBaseline="top";
+ ctx.font="bold 27px "+font;ctx.fillText("Ship from",layout.x,layout.y);
+ ctx.font=layout.size+"px "+font;
+ let y=layout.y+layout.headingHeight+layout.gap;
+ for(const line of layout.rows){ctx.fillText(line,layout.x,y);y+=layout.lineHeight;}
+ const bitmap=rgbaToBitmap(ctx.getImageData(0,0,width,height).data,width,height);
+ return {bytes:encodeInkOnlyTspl(bitmap,w,h),font,layout};
 }
 export function testPage(settings){
  return encodeReliableLabel("PIKO TEST",["Bluetooth test","Clear native font","Centered text"],Number(settings.labelWidth)||2.25,Number(settings.labelHeight)||1.25);
