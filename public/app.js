@@ -103,6 +103,26 @@ $("business-save").onclick=()=>scheduleSettingsSave(true);
 $("save").onclick=()=>scheduleSettingsSave(true);
 
 $("logout").onclick=async()=>{await call("logout",{method:"POST"});location.reload()};$("close").onclick=()=>{$("modal").classList.add("hidden")};
+// Browser-native letter layout: call print() directly without sending users
+// to Chrome's PDF viewer. Android may still require a confirmation.
+function canonSlipHtml(orders,s){
+ const safe=x=>esc(x??"");
+ const address=(name,addr)=>[name,addr?.line1,addr?.line2,addr?.cityStatePostal,addr?.country].filter(Boolean).map(safe).join("<br>");
+ const price=x=>x?.value!=null?safe(Number(x.value).toFixed(2)+" "+(x.currency||"CAD")):"-";
+ const pages=orders.map(o=>{
+  const items=(o.items||[]).map(i=>"<tr><td>"+safe(i.title)+"</td><td>"+safe(i.quantity)+"</td><td>"+price(i.price)+"</td></tr>").join("");
+  return '<section class="sheet"><header><h1>'+safe(s.storeName||"PIKO CARDS")+'</h1><aside><b>PACKING SLIP</b><small>Order '+safe(o.displayId||o.id)+'</small></aside></header>'+
+   '<div class="addresses"><div><h3>SHIP TO</h3>'+address(o.shipTo?.name,o.shipTo)+'</div><div><h3>SHIP FROM</h3>'+address(s.returnName,s.returnAddress)+'</div></div>'+
+   '<div class="metadata"><span>Buyer: '+safe(o.buyer||"-")+'</span><span>Date: '+safe(String(o.createdAt||"").slice(0,10))+'</span></div>'+
+   '<table><thead><tr><th>ITEM</th><th>QTY</th><th>PRICE</th></tr></thead><tbody>'+items+'</tbody></table>'+
+   '<div class="totals"><p>Shipping <b>'+price(o.shippingCost)+'</b></p><p><strong>Total</strong><strong>'+price(o.total)+'</strong></p></div>'+
+   '<div class="message"><b>A MESSAGE FROM PIKO CARDS</b><p>'+safe(s.thankYouMessage||"Thank you for your purchase!")+'</p></div>'+
+   '<p class="footer">Thank you for supporting a Canadian small business.</p></section>';
+ }).join("");
+ const css='@page{size:letter;margin:0}*{box-sizing:border-box}body{margin:0;font:10pt Arial,sans-serif;color:#222}.screen{padding:14px;background:#eee;font:14px system-ui}.screen button{padding:10px 22px;background:#151515;color:white;border:0;border-radius:8px;font:inherit}.sheet{position:relative;padding:.6in;width:8.5in;min-height:11in;break-after:page;page-break-after:always}.sheet:last-of-type{break-after:auto;page-break-after:auto}header{display:flex;align-items:start;justify-content:space-between;border-bottom:1px solid #222;padding-bottom:22px}header h1{font-size:23pt;margin:0}header aside{text-align:right}header aside small{display:block;margin-top:7px}.addresses{display:grid;grid-template-columns:1fr 1fr;gap:36px;min-height:150px;padding-top:20px;line-height:1.45}.addresses h3{font-size:9pt;margin:0 0 6px}.metadata{display:flex;justify-content:space-between;border-bottom:1px solid #555;padding-bottom:13px}table{border-collapse:collapse;width:100%;table-layout:fixed;margin-top:13px}th{text-align:left;border-bottom:1px solid #777;padding:10px 0}td{padding:12px 0;vertical-align:top;overflow-wrap:anywhere}th:first-child,td:first-child{width:74%}.totals{margin:20px 0 0 auto;width:38%;border-top:1px solid #888;padding-top:5px}.totals p{display:flex;justify-content:space-between}.message{position:absolute;bottom:.9in;left:.6in;right:.6in;border-top:1px solid #aaa;padding-top:14px}.message b{font-size:8pt}.message p{margin-top:8px}.footer{position:absolute;bottom:.4in;left:.6in;font-size:8pt}@media print{.screen{display:none}}';
+ const startup='window.addEventListener("load",()=>setTimeout(()=>{try{window.print()}catch(e){}},300));';
+ return '<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Piko Packing Slip — Canon</title><style>'+css+'</style></head><body><div class="screen">Canon packing slips — choose Canon and confirm in Android. <button onclick="window.print()">Print on Canon</button></div>'+pages+'<script>'+startup+'<\/script></body></html>';
+}
 // The main action prints MUNBYN labels over BLE and prepares only Canon PDFs.
 $("print").onclick=async()=>{
  const orders=state.orders.filter(o=>state.selected.has(o.id));
@@ -117,8 +137,9 @@ $("print").onclick=async()=>{
  if(needPacking){
    canonTab=window.open("about:blank","_blank");
    if(canonTab){
-     canonTab.document.title="Preparing Canon packing slip";
-     canonTab.document.body.innerHTML='<p style="font:16px system-ui;padding:32px">Preparing Canon packing slip…</p>';
+     canonTab.document.open();
+     canonTab.document.write(canonSlipHtml(orders,state.settings));
+     canonTab.document.close();
    }
  }
  state.working=true;updatePrintControls();
@@ -143,11 +164,10 @@ $("print").onclick=async()=>{
    state.urls.forEach(URL.revokeObjectURL);state.urls=[packingUrl];
    $("packing-link").classList.remove("hidden");$("packing-link").href=packingUrl;
    $("labels-link").classList.add("hidden");$("labels-link").removeAttribute("href");
-   if(canonTab&&!canonTab.closed){
-    canonTab.location.replace(packingUrl);
-   }
+   // Canon printing was requested by the HTML popup from the original click.
+   // The generated PDF is retained as backup rather than replacing that tab.
    $("ready").textContent=(labelSent?orders.length*2+" MUNBYN labels transmitted. ":"")+
-     "Canon packing slip "+(canonTab?"opened automatically.":"prepared; tap Open packing slips.")+
+     "Canon print dialog "+(canonTab?"requested automatically.":"could not open; use PDF backup.")+
      " Confirm printing on Canon in Android.";
    $("modal").classList.remove("hidden");
   }else toast(orders.length*2+" labels transmitted to MUNBYN. Check printed addresses.");
