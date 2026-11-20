@@ -84,42 +84,64 @@ export function labelsPdf(orders,settings){
 }
 
 const money=(obj)=>{if(!obj||obj.value==null)return '';const n=Number(obj.value);return Number.isFinite(n)?`${n.toFixed(2)} ${obj.currency||'CAD'}`:'';};
+export function planPackingItems(items){
+ const list=Array.isArray(items)?items:[];
+ const columns=list.length<=13?1:list.length<=26?2:3;
+ const colW=(526-(columns-1)*11)/columns;
+ for(const font of [8.2,7.5,7,6.5,6.1]){
+  const groupSize=Math.ceil(list.length/columns);
+  const groups=Array.from({length:columns},(_,i)=>list.slice(i*groupSize,(i+1)*groupSize));
+  const laid=groups.map(group=>group.map(item=>{
+   const rows=wrap(item.title||'Unnamed item',colW-7,font,100);
+   const height=rows.length*(font+1)+(columns===1?1:font+2)+3;
+   return {item,rows,height};
+  }));
+  const heights=laid.map(group=>group.reduce((sum,i)=>sum+i.height,0));
+  if(Math.max(0,...heights)<=350)return {columns,colW,font,laid,total:list.reduce((n,i)=>n+(Number(i.quantity)||0),0),count:list.length};
+ }
+ throw Error('The complete item list cannot fit legibly on one packing-slip page; no items omitted. Shorten listing titles or use a larger summary format.');
+}
 export function packingPdf(orders,settings){
- const w=8.5*PT,h=11*PT,m=43;
+ const w=612,h=792,m=43;
  const pages=orders.map(order=>{
-   let c='0 0 0 RG 0 0 0 rg\n';
-   c+=text(m,h-65,settings.storeName||'PIKO CARDS',23,true);
-   c+=text(w-m-175,h-60,'PACKING SLIP',11,true);
-   c+=text(w-m-175,h-78,`Order ${order.displayId||order.id}`,8);
-   c+=line(m,h-94,w-m,h-94,.9);
-   c+=text(m,h-124,'SHIP TO',9,true);c+=text(330,h-124,'SHIP FROM',9,true);
-   let y1=h-142,y2=h-142;
-   for(const row of addressLines(order.shipTo?.name,order.shipTo)){for(const r of wrap(row,250,10)){c+=text(m,y1,r,10);y1-=14;}}
-   for(const row of addressLines(settings.returnName,settings.returnAddress)){for(const r of wrap(row,220,10)){c+=text(330,y2,r,10);y2-=14;}}
-   c+=text(m,h-248,`Buyer: ${order.buyer||'-'}`,9);
-   c+=text(330,h-248,`Date: ${String(order.createdAt||'').slice(0,10)||'-'}`,9);
-   c+=line(m,h-265,w-m,h-265,.8);
-   c+=text(m,h-288,'ITEM',9,true);c+=text(435,h-288,'QTY',9,true);c+=text(483,h-288,'PRICE',9,true);
-   c+=line(m,h-298,w-m,h-298,.4);
-   let y=h-319;
-   for(const item of order.items.slice(0,24)){
-      const lines=wrap(item.title,372,9,3);
-      for(let i=0;i<lines.length;i++){c+=text(m,y,lines[i],9,i===0);y-=12;}
-      c+=text(436,y+12*lines.length-12,String(item.quantity),9);
-      c+=text(483,y+12*lines.length-12,money(item.price)||'-',9);
-      y-=14;
-      if(y<175){c+=text(m,y,'Additional items not shown — check order in eBay.',8);break;}
+  const plan=planPackingItems(order.items||[]);
+  let c='0 0 0 RG 0 0 0 rg\n';
+  c+=text(m,744,settings.storeName||'PIKO CARDS',21,true);
+  c+=text(400,744,'PACKING SLIP',11,true);
+  c+=text(400,726,'Order '+(order.displayId||order.id),8);
+  c+=line(m,711,w-m,711,.9);
+  c+=text(m,692,'SHIP TO',9,true);c+=text(327,692,'SHIP FROM',9,true);
+  let left=677,right=677;
+  for(const value of addressLines(order.shipTo?.name,order.shipTo))for(const row of wrap(value,245,9.2,80)){c+=text(m,left,row,9.2);left-=12;}
+  for(const value of addressLines(settings.returnName,settings.returnAddress))for(const row of wrap(value,219,9.2,80)){c+=text(327,right,row,9.2);right-=12;}
+  if(left<593||right<593)throw Error('An address is too long for a one-page packing slip.');
+  c+=text(m,583,'Buyer: '+(order.buyer||'-'),8.5);
+  c+=text(327,583,'Date: '+String(order.createdAt||'').slice(0,10),8.5);
+  c+=line(m,569,w-m,569,.55);
+  c+=text(m,555,'ITEMS ('+plan.count+' listings, '+plan.total+' cards)',8.5,true);
+  c+=line(m,548,w-m,548,.35);
+  for(let col=0;col<plan.laid.length;col++){
+   const x=m+col*(plan.colW+11);
+   let y=535;
+   for(const entry of plan.laid[col]){
+    for(let i=0;i<entry.rows.length;i++){c+=text(x,y,entry.rows[i],plan.font,i===0);y-=plan.font+1;}
+    c+=text(x+2,y,String(entry.item.quantity??1)+' x  '+(money(entry.item.price)||'-'),Math.max(6,plan.font-1));
+    y-=entry.height-entry.rows.length*(plan.font+1);
    }
-   const sy=Math.max(150,y-15);c+=line(355,sy,w-m,sy,.65);
-   c+=text(375,sy-21,'Shipping',9);c+=text(480,sy-21,money(order.shippingCost)||'-',9);
-   c+=text(375,sy-39,'Total',10,true);c+=text(480,sy-39,money(order.total)||'-',10,true);
-   c+=line(m,125,w-m,125,.7);
-   c+=text(m,104,'A MESSAGE FROM PIKO CARDS',8,true);
-   const msg=String(settings.thankYouMessage||'Thanks for your purchase! I hope you love it!');
-   let yy=87;for(const r of wrap(msg,w-2*m,9,2)){c+=text(m,yy,r,9);yy-=12;}
-   c+=text(m,35,'Thank you for supporting a Canadian small business.',8);
-   return {w,h,commands:c};
- });return createPdf(pages);
+   if(y<170)throw Error('Packing slip items extend into totals; no items omitted.');
+  }
+  c+=line(m,151,w-m,151,.6);
+  c+=text(380,136,'Shipping',8.5);c+=text(480,136,money(order.shippingCost)||'-',8.5);
+  c+=text(380,121,'Total',9,true);c+=text(480,121,money(order.total)||'-',9,true);
+  c+=text(m,105,'A MESSAGE FROM PIKO CARDS',8,true);
+  const message=String(settings.thankYouMessage||'Thanks for your purchase!');
+  const lines=wrap(message,310,8,100);
+  if(lines.length>3)throw Error('Thank-you message is too long for one page.');
+  let yy=90;for(const line of lines){c+=text(m,yy,line,8);yy-=10;}
+  c+=text(m,30,'Thank you for supporting a Canadian small business.',8);
+  return {w,h,commands:c};
+ });
+ return createPdf(pages);
 }
 
 /** Exact-size PDF for testing each sheet in the MUNBYN. */
