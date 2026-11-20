@@ -203,31 +203,54 @@ function layoutLines(rows,maxChars){
  }
  return out;
 }
-export function encodeTextLabel(title,lines,widthIn=2.25,heightIn=1.25){
- const w=Math.round(widthIn*DPI),h=Math.round(heightIn*DPI),m=20,top=17;
- if(w<440||w>875||h<250||h>1259)throw Error("Invalid thermal label dimensions");
- const rows=layoutLines(lines,Math.floor((w-2*m)/12));
- if(!rows.length)throw Error("Cannot print a blank address label.");
- if(top+33+rows.length*27>h-9)throw Error("Address has "+rows.length+" lines and does not fit "+widthIn+" x "+heightIn+" inches. No labels sent.");
- const cmds=[
-  "SIZE "+(widthIn*25.4).toFixed(2)+" mm,"+(heightIn*25.4).toFixed(2)+" mm",
-  "GAP 3 mm,0 mm","DIRECTION 0,0","REFERENCE 0,0","CODEPAGE 1252","CLS",
-  'TEXT '+m+','+top+',"3",0,1,1,"'+cleanText(title)+'"'
- ];
- let y=top+33;
- for(const line of rows){cmds.push('TEXT '+m+','+y+',"2",0,1,1,"'+line+'"');y+=27;}
- cmds.push("PRINT 1,1");
- return {bytes:codepage1252(cmds.join("\r\n")+"\r\n"),lines:rows};
+
+export function layoutAddressCentered(lines,width,height,measure=(t,size)=>t.length*size*.53){
+ const margin=18,headingHeight=34,gap=8;
+ for(let size=28;size>=17;size--){
+  const rows=[];let bad=false;
+  for(const raw of lines){
+   let current="";
+   for(const word of String(raw).split(/\s+/).filter(Boolean)){
+    if(measure(word,size)>width-2*margin){bad=true;break;}
+    const next=current?current+" "+word:word;
+    if(current&&measure(next,size)>width-2*margin){rows.push(current);current=word;}
+    else current=next;
+   }
+   if(bad)break;
+   if(current)rows.push(current);
+  }
+  if(bad)continue;
+  const lineHeight=Math.ceil(size*1.18),total=headingHeight+gap+lineHeight*rows.length;
+  if(!rows.length||total>height-2*margin)continue;
+  // Center the address block while retaining left-aligned text.
+  const widest=Math.max(measure("Ship from",26),measure("Ship to",26),...rows.map(x=>measure(x,size)));
+  const x=Math.floor((width-widest)/2),y=Math.floor((height-total)/2);
+  return {rows,size,lineHeight,headingHeight,gap,total,widest,x,y};
+ }
+ throw Error("Address does not fit on this label at a readable size. No labels sent.");
 }
-export function commandsForOrder(order,settings){
+function rasterLabel(title,lines,w,h){
+ const width=Math.round(w*DPI),height=Math.round(h*DPI);
+ if(width<440||width>875||height<250||height>1259)throw Error("Unsupported label dimensions.");
+ const canvas=document.createElement("canvas");canvas.width=width;canvas.height=height;
+ const ctx=canvas.getContext("2d",{willReadFrequently:true});
+ if(!ctx)throw Error("This browser cannot render thermal labels.");
+ const info=layoutAddressCentered(lines,width,height,(text,size)=>{ctx.font=size+"px Arial";return ctx.measureText(text).width});
+ ctx.fillStyle="white";ctx.fillRect(0,0,width,height);ctx.fillStyle="black";ctx.textBaseline="top";
+ ctx.font="bold 26px Arial";ctx.fillText(title,info.x,info.y);
+ ctx.font=info.size+"px Arial";
+ let y=info.y+info.headingHeight+info.gap;
+ for(const row of info.rows){ctx.fillText(row,info.x,y);y+=info.lineHeight;}
+ return rgbaToBitmap(ctx.getImageData(0,0,width,height).data,width,height);
+}
+export function pagesForOrder(order,settings){
  const w=Number(settings.labelWidth)||2.25,h=Number(settings.labelHeight)||1.25;
  const from=rowsOf(settings.returnName,settings.returnAddress),to=rowsOf(order.shipTo?.name,order.shipTo);
- if(from.length<3)throw Error("Enter a complete return address in Business details.");
- if(to.length<3)throw Error("Recipient address is incomplete. Check the eBay order.");
- return [encodeTextLabel("Ship from",from,w,h),encodeTextLabel("Ship to",to,w,h)];
+ if(from.length<3||to.length<3)throw Error("Return or recipient address is incomplete. No labels sent.");
+ return [rasterLabel("Ship from",from,w,h),rasterLabel("Ship to",to,w,h)];
 }
 export function testPage(settings){
- return encodeTextLabel("PIKO TEST",["Bluetooth test","Check all lines","Check alignment"],Number(settings.labelWidth)||2.25,Number(settings.labelHeight)||1.25);
+ return rasterLabel("PIKO TEST",["Arial font test","Large centered text","Print alignment"],Number(settings.labelWidth)||2.25,Number(settings.labelHeight)||1.25);
 }
 export async function printPages(pages,settings){
  if(busy)throw Error("Another print job is active.");
@@ -238,11 +261,11 @@ export async function printPages(pages,settings){
   for(let i=0;i<pages.length;i++){
    const data=pages[i].bytes||encodeTspl(pages[i],Number(settings.labelWidth)||2.25,Number(settings.labelHeight)||1.25);
    report("Sending label "+(i+1)+" of "+pages.length+"...");
-   for(let pos=0;pos<data.length;pos+=64){
+   for(let pos=0;pos<data.length;pos+=20){
     if(!isPrinterConnected())throw Error("MUNBYN disconnected");
     attempted=true;
-    await writer.writeValueWithResponse(data.subarray(pos,Math.min(pos+64,data.length)));
-    await delay(32);
+    await writer.writeValueWithResponse(data.subarray(pos,Math.min(pos+20,data.length)));
+    await delay(25);
    }
    await delay(1300);
   }
@@ -252,6 +275,6 @@ export async function printPages(pages,settings){
 }
 export async function printOrders(orders,settings){
  if(!orders.length||orders.length>25)throw Error("Select between 1 and 25 orders.");
- const pages=orders.flatMap(o=>commandsForOrder(o,settings)); // validate every label before sending
+ const pages=orders.flatMap(o=>pagesForOrder(o,settings)); // validate both labels before sending
  await printPages(pages,settings);
 }
