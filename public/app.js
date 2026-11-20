@@ -20,10 +20,10 @@ function render(){const list=filtered();$("count").textContent=state.orders.leng
 const docName=()=>state.docs.packing&&state.docs.labels?"both":state.docs.packing?"packing slip":state.docs.labels?"address label":"none";
 function updatePrintControls(){
  const count=state.selected.size,active=!!(state.docs.packing||state.docs.labels),busy=state.working;
- const type=state.docs.packing&&state.docs.labels?"both documents":state.docs.packing?"packing slips":state.docs.labels?"address labels":"documents";
- const label="Prepare "+type+" · "+count+" order"+(count===1?"":"s")+" →";
- $("print").textContent=busy?"Preparing PDFs…":label;$("print").disabled=!count||!active||busy;
- $("tablet-print").textContent=busy?"Preparing…":"Prepare →";$("tablet-print").disabled=!count||!active||busy;
+ const type=state.docs.packing&&state.docs.labels?"MUNBYN labels + Canon slips":state.docs.packing?"Canon packing slips":state.docs.labels?"MUNBYN Bluetooth labels":"documents";
+ const label=(state.docs.labels?"Print ":"Prepare ")+type+" · "+count+" order"+(count===1?"":"s")+" →";
+ $("print").textContent=busy?"Working…":label;$("print").disabled=!count||!active||busy||state.directBusy;
+ $("tablet-print").textContent=busy?"Working…":(state.docs.labels?"Print →":"Prepare →");$("tablet-print").disabled=!count||!active||busy||state.directBusy;
  $("dock-orders").textContent=count+" order"+(count===1?"":"s")+" selected";$("dock-docs").textContent=active?type:"Select at least one document";
  $("include-packing").checked=state.docs.packing;$("include-labels").checked=state.docs.labels;
 }
@@ -102,29 +102,43 @@ $("business-save").onclick=()=>scheduleSettingsSave(true);
 $("save").onclick=()=>scheduleSettingsSave(true);
 
 $("logout").onclick=async()=>{await call("logout",{method:"POST"});location.reload()};$("close").onclick=()=>{$("modal").classList.add("hidden")};
+// The main action prints MUNBYN labels over BLE and prepares only Canon PDFs.
 $("print").onclick=async()=>{
  const orders=state.orders.filter(o=>state.selected.has(o.id));
- const kinds=[state.docs.packing?"packing":null,state.docs.labels?"labels":null].filter(Boolean);
- if(!orders.length||!kinds.length||state.working)return;
+ const needLabels=state.docs.labels,needPacking=state.docs.packing;
+ if(!orders.length||(!needLabels&&!needPacking)||state.working||state.directBusy)return;
+ if(needLabels&&orders.length>25){toast("Direct MUNBYN printing supports up to 25 orders per batch.");return}
+ // The Web Bluetooth permission chooser MUST begin synchronously in this click event.
+ const connection=needLabels?(isPrinterConnected()?Promise.resolve():connectPrinter()):Promise.resolve();
  state.working=true;updatePrintControls();
  try{
-  // The same PDF endpoints power both preview and final documents.
-  const links=await Promise.all(kinds.map(async kind=>{
-   const r=await fetch("/api/documents/"+kind,{method:"POST",credentials:"same-origin",headers:{"Content-Type":"application/json"},body:JSON.stringify({orders,settings:state.settings})});
-   if(!r.ok){const data=await r.json().catch(()=>({}));throw Error(data.error||"PDF generation failed")}
-   return [kind,URL.createObjectURL(await r.blob())]
-  }));
-  state.urls.forEach(URL.revokeObjectURL);state.urls=links.map(pair=>pair[1]);
-  for(const [kind,id] of [["packing","packing-link"],["labels","labels-link"]]){
-   const link=links.find(pair=>pair[0]===kind),el=$(id);
-   el.classList.toggle("hidden",!link);
-   if(link)el.href=link[1];else el.removeAttribute("href");
+  if(needLabels){
+   await connection;
+   bluetoothStatus("Sending "+(orders.length*2)+" address labels directly to MUNBYN…");
+   await printOrders(orders,state.settings);
   }
-  const names=kinds.map(kind=>kind==="packing"?"packing slips":"address labels").join(" + ");
-  $("ready").textContent=orders.length+" order"+(orders.length===1?"":"s")+" · "+names+".";
-  $("modal").classList.remove("hidden");
- }catch(e){toast(e.message)}
- finally{state.working=false;updatePrintControls()}
+  if(needPacking){
+   const r=await fetch("/api/documents/packing",{
+    method:"POST",credentials:"same-origin",
+    headers:{"Content-Type":"application/json"},
+    body:JSON.stringify({orders,settings:state.settings})
+   });
+   if(!r.ok){const data=await r.json().catch(()=>({}));throw Error(data.error||"Unable to prepare Canon packing slips")}
+   const url=URL.createObjectURL(await r.blob());
+   state.urls.forEach(URL.revokeObjectURL);state.urls=[url];
+   $("packing-link").classList.remove("hidden");$("packing-link").href=url;
+   $("labels-link").classList.add("hidden");$("labels-link").removeAttribute("href");
+   $("ready").textContent=(needLabels?orders.length*2+" MUNBYN labels sent via Bluetooth. ":"")+
+     orders.length+" packing slip"+(orders.length===1?"":"s")+" ready to print on Canon.";
+   $("modal").classList.remove("hidden");
+  }else{
+   toast(orders.length*2+" labels sent to MUNBYN. Check the printed paper.");
+  }
+ }catch(e){
+  const msg=e?.message||"Printing failed";
+  bluetoothStatus(msg,"error");
+  toast(msg);
+ }finally{state.working=false;updatePrintControls()}
 };
 function testPrinter(type){
   const isLabel=type==="label";
@@ -191,7 +205,7 @@ $("direct-test").onclick=async()=>{
  state.directBusy=true;updatePrintControls();bluetoothStatus("Preparing one calibration label…");
  try{await printPages([testPage(state.settings)],state.settings)}
  catch(e){bluetoothStatus(e.message,"error")}
- finally{state.directBusy=false;updatePrintControls();bluetoothStatus(isPrinterConnected()?"Connected: check your last print result.":"Disconnected.");}
+ finally{state.directBusy=false;updatePrintControls()}
 };
 $("direct-print").onclick=async()=>{
  const orders=state.orders.filter(o=>state.selected.has(o.id));
