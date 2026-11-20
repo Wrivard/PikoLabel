@@ -138,3 +138,18 @@ test("oversized address fails instead of clipping lines",async()=>{
  const {layoutAddressCentered}=await import("../public/munbyn-direct.js");
  assert.throws(()=>layoutAddressCentered(Array.from({length:18},()=> "Long extra address line"),457,254),/does not fit/);
 });
+
+test("stalled Bluetooth writes time out instead of hanging forever",async()=>{
+ const {writeChunkWithTimeout,BluetoothWriteTimeout}=await import("../public/munbyn-direct.js");
+ let reset=false;
+ await assert.rejects(writeChunkWithTimeout({writeValueWithResponse(){return new Promise(()=>{})}},new Uint8Array([1]),{
+  timeoutMs:25,label:1,packet:2,onTimeout(){reset=true}
+ }),BluetoothWriteTimeout);
+ assert.equal(reset,true);
+});
+test("successful write does not trigger timeout",async()=>{
+ const {writeChunkWithTimeout}=await import("../public/munbyn-direct.js");
+ let reset=false;
+ await writeChunkWithTimeout({async writeValueWithResponse(){}},new Uint8Array([1]),{timeoutMs:100,onTimeout(){reset=true}});
+ assert.equal(reset,false);
+});
