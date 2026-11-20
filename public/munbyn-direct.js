@@ -1,32 +1,101 @@
 // Experimental direct BLE printing for MUNBYN ITPP130B (203 DPI, TSPL, FFF2).
-// Print bytes are generated on the tablet; no third-party file import.
+// Remember only the device ID and browser-granted permission, not passwords or order data.
 const TE=new TextEncoder(),DPI=203,delay=ms=>new Promise(r=>setTimeout(r,ms));
 const uuid=n=>"0000"+n.toString(16).padStart(4,"0")+"-0000-1000-8000-00805f9b34fb";
 const services=[0xfff0,0xff00,0xffe0,0xffa0,0xffd0,0xffb0,0xffe5];
-let device=null,writer=null,listener=()=>{},busy=false;
+const STORAGE_KEY="piko-munbyn-device-id";
+let device=null,writer=null,listener=()=>{},busy=false,connectionPromise=null,manualStop=false;
 const report=(message,type="info")=>listener(message,type);
+const savedId=()=>{try{return localStorage.getItem(STORAGE_KEY)||""}catch{return ""}};
+const remember=id=>{try{if(id)localStorage.setItem(STORAGE_KEY,id)}catch{}};
+const forget=()=>{try{localStorage.removeItem(STORAGE_KEY)}catch{}};
 export const setPrinterStatusListener=fn=>listener=fn;
 export const isPrinterConnected=()=>!!(writer&&device?.gatt?.connected);
 export const webBluetoothSupported=()=>typeof navigator!=="undefined"&&!!navigator.bluetooth;
-export function disconnectPrinter(){if(busy)throw Error("Printing in progress.");writer=null;device?.gatt?.disconnect();report("Bluetooth disconnected.");}
-export async function connectPrinter(){
- if(isPrinterConnected())return device.name||"MUNBYN";
- if(!webBluetoothSupported())throw Error("Use Google Chrome on Android for direct Bluetooth access.");
- // Request is performed at the start of a click action (browser permission requirement).
- report("Select your MUNBYN ITPP130B in the Bluetooth picker…");
- const selected=await navigator.bluetooth.requestDevice({acceptAllDevices:true,optionalServices:services.map(uuid)});
+export function disconnectPrinter(){
+ if(busy)throw Error("Printing in progress.");
+ manualStop=true;forget();writer=null;
+ const old=device;device=null;
+ if(old?.gatt?.connected)old.gatt.disconnect();
+ report("Disconnected and forgotten on this browser. Tap Connect to authorize again.");
+}
+async function openGatt(selected){
+ if(isPrinterConnected()&&device?.id===selected.id)return selected.name||"MUNBYN";
+ if(connectionPromise)return connectionPromise;
+ manualStop=false;
  if(device&&device!==selected&&device.gatt?.connected)device.gatt.disconnect();
  device=selected;writer=null;
- selected.addEventListener("gattserverdisconnected",()=>{if(device===selected){writer=null;report("Disconnected. Tap Connect to reconnect.","warning");}});
- report("Connecting to "+(selected.name||"device")+"…");
- const gatt=await selected.gatt.connect();
- for(const n of services){try{
-   const characteristic=await (await gatt.getPrimaryService(uuid(n))).getCharacteristic(uuid(0xfff2));
-   if(characteristic.properties.write&&typeof characteristic.writeValueWithResponse==="function"){writer=characteristic;break;}
- }catch{}}
- if(!writer){gatt.disconnect();throw Error("The printer connected, but no writable FFF2 service was found. This firmware may require a native Android print bridge.");}
- report("Connected: "+(selected.name||"ITPP130B")+". Print a test label first.","success");
- return selected.name||"MUNBYN";
+ selected.addEventListener("gattserverdisconnected",()=>{
+   if(device!==selected)return;
+   writer=null;
+   if(!manualStop)report("MUNBYN disconnected. Reopen the page or tap Connect to retry.","warning");
+ });
+ connectionPromise=(async()=>{
+   report("Connecting to "+(selected.name||"MUNBYN")+"…");
+   const server=await selected.gatt.connect();
+   let characteristic=null;
+   // GATT objects must be rediscovered after every connection.
+   for(const n of services){
+     try{
+       const service=await server.getPrimaryService(uuid(n));
+       const candidate=await service.getCharacteristic(uuid(0xfff2));
+       if(candidate.properties.write&&typeof candidate.writeValueWithResponse==="function"){
+         characteristic=candidate;break;
+       }
+     }catch{}
+   }
+   if(!characteristic)throw Error("This MUNBYN does not expose a writable FFF2 service.");
+   writer=characteristic;remember(selected.id);
+   report("Connected to "+(selected.name||"MUNBYN")+". This browser remembers the printer.","success");
+   return selected.name||"MUNBYN";
+ })();
+ try{return await connectionPromise;}
+ catch(e){writer=null;if(selected.gatt?.connected)selected.gatt.disconnect();throw e;}
+ finally{connectionPromise=null;}
+}
+export async function connectPrinter(){
+ if(isPrinterConnected())return device.name||"MUNBYN";
+ if(!webBluetoothSupported())throw Error("Use Chrome on Android for direct Bluetooth.");
+ // requestDevice must execute in the direct user click gesture.
+ manualStop=false;
+ report("Choose your MUNBYN in Chrome’s Bluetooth picker…");
+ const selected=await navigator.bluetooth.requestDevice({acceptAllDevices:true,optionalServices:services.map(uuid)});
+ return openGatt(selected);
+}
+/** Reconnect to the site-authorized MUNBYN after a page reload without a new picker.
+ * A physical Bluetooth session cannot persist across a browser page reload.
+ */
+export async function reconnectRememberedPrinter(){
+ if(manualStop||isPrinterConnected())return isPrinterConnected();
+ if(!webBluetoothSupported())return false;
+ if(typeof navigator.bluetooth.getDevices!=="function"){
+   report("This Chrome version cannot restore Bluetooth automatically. Tap Connect after refresh.","warning");
+   return false;
+ }
+ try{
+   const granted=await navigator.bluetooth.getDevices();
+   if(manualStop||isPrinterConnected())return isPrinterConnected();
+   const id=savedId();let selected=id?granted.find(x=>x.id===id):null;
+   // Existing users first granted permission before we stored the device ID.
+   if(!selected&&!id){
+     const found=granted.filter(x=>/munbyn|itpp130/i.test(x.name||""));
+     if(found.length===1)selected=found[0];
+   }
+   if(!selected){
+     report(id?"Saved MUNBYN is no longer authorized. Tap Connect again.":"Connect MUNBYN once to remember it.","info");
+     return false;
+   }
+   report("Restoring your saved MUNBYN Bluetooth connection…");
+   await openGatt(selected);return true;
+ }catch(e){
+   report("Could not reconnect automatically: "+(e?.message||"unknown error")+". Tap Connect to retry.","warning");
+   return false;
+ }
+}
+if(typeof document!=="undefined"&&typeof document.addEventListener==="function"){
+ document.addEventListener("visibilitychange",()=>{
+   if(document.visibilityState==="visible"&&!manualStop&&!isPrinterConnected()&&savedId())void reconnectRememberedPrinter();
+ });
 }
 export function rgbaToBitmap(rgba,width,height){
  if(!Number.isInteger(width)||!Number.isInteger(height)||width<1||height<1||width>1000||height>1800||rgba.length<width*height*4)throw Error("Invalid label bitmap.");

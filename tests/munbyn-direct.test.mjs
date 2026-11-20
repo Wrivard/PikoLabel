@@ -19,3 +19,45 @@ test("TSPL stream has exact physical size, bitmap payload, and one print",()=>{
 test("invalid bitmaps are rejected",()=>{
  assert.throws(()=>rgbaToBitmap(new Uint8Array(0),8,8),/Invalid/);
 });
+
+test("previously authorized MUNBYN reconnects after refresh without picker",async()=>{
+ const mod=await import("../public/munbyn-direct.js?restore-test");
+ const oldN=globalThis.navigator,oldS=globalThis.localStorage;
+ const store=new Map([["piko-munbyn-device-id","remembered-id"]]),calls=[];
+ const characteristic={properties:{write:true},async writeValueWithResponse(){}};
+ const dev={id:"remembered-id",name:"MUNBYN ITPP130B",gatt:{
+   connected:false,async connect(){this.connected=true;return this;},
+   async getPrimaryService(){return {async getCharacteristic(){return characteristic}};},
+   disconnect(){this.connected=false;}
+ },addEventListener(){}};
+ Object.defineProperty(globalThis,"navigator",{configurable:true,value:{bluetooth:{
+   async getDevices(){calls.push("getDevices");return [dev]},
+   async requestDevice(){calls.push("picker");throw Error("unexpected picker")}
+ }}});
+ globalThis.localStorage={getItem:k=>store.get(k)||null,setItem:(k,v)=>store.set(k,v),removeItem:k=>store.delete(k)};
+ try{
+   assert.equal(await mod.reconnectRememberedPrinter(),true);
+   assert.equal(mod.isPrinterConnected(),true);
+   assert.deepEqual(calls,["getDevices"]);
+   mod.disconnectPrinter();
+   assert.equal(store.has("piko-munbyn-device-id"),false);
+   assert.equal(await mod.reconnectRememberedPrinter(),false);
+ }finally{Object.defineProperty(globalThis,"navigator",{configurable:true,value:oldN});globalThis.localStorage=oldS}
+});
+test("unsupported getDevices fails without crashing the app",async()=>{
+ const mod=await import("../public/munbyn-direct.js?unsupported");
+ const oldN=globalThis.navigator;
+ Object.defineProperty(globalThis,"navigator",{configurable:true,value:{bluetooth:{requestDevice(){}}}});
+ try{assert.equal(await mod.reconnectRememberedPrinter(),false)}
+ finally{Object.defineProperty(globalThis,"navigator",{configurable:true,value:oldN})}
+});
+test("revoked permission never triggers unexpected device picker",async()=>{
+ const mod=await import("../public/munbyn-direct.js?revoked");
+ const oldN=globalThis.navigator,oldS=globalThis.localStorage;
+ Object.defineProperty(globalThis,"navigator",{configurable:true,value:{bluetooth:{
+   async getDevices(){return []},async requestDevice(){throw Error("unexpected picker")}
+ }}});
+ globalThis.localStorage={getItem:()=> "remembered-id",setItem(){},removeItem(){}};
+ try{assert.equal(await mod.reconnectRememberedPrinter(),false)}
+ finally{Object.defineProperty(globalThis,"navigator",{configurable:true,value:oldN});globalThis.localStorage=oldS}
+});
