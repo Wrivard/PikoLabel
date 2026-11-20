@@ -130,7 +130,7 @@ $("print").onclick=async()=>{
    $("packing-link").classList.remove("hidden");$("packing-link").href=url;
    $("labels-link").classList.add("hidden");$("labels-link").removeAttribute("href");
    $("ready").textContent=(needLabels?orders.length*2+" MUNBYN labels sent via Bluetooth. ":"")+
-     orders.length+" packing slip"+(orders.length===1?"":"s")+" ready to print on Canon.";
+     orders.length+" packing slip"+(orders.length===1?"":"s")+" ready for Canon. Not printed yet — tap Open packing slips and confirm Print.";
    $("modal").classList.remove("hidden");
   }else{
    toast(orders.length*2+" labels sent to MUNBYN. Check the printed paper.");

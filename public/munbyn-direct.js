@@ -171,71 +171,87 @@ export function encodeTspl(bitmap,widthIn,heightIn){
  parts.push(TE.encode("PRINT 1,1\r\n"));
  return concat(parts);
 }
-function rowsOf(name,address){return [name,address?.line1,address?.line2,address?.cityStatePostal,address?.country].map(x=>String(x||"").trim()).filter(Boolean);}
-function render(title,lines,w,h){
- const canvas=document.createElement("canvas");canvas.width=Math.round(w*DPI);canvas.height=Math.round(h*DPI);
- const ctx=canvas.getContext("2d",{willReadFrequently:true});
- if(!ctx)throw Error("Canvas printing is unsupported by this browser.");
- ctx.fillStyle="#fff";ctx.fillRect(0,0,canvas.width,canvas.height);ctx.fillStyle="#000";
- const margin=Math.round(.13*DPI),max=canvas.width-2*margin;
- let font=Math.min(30,Math.round(10*DPI/72)),linesOut=[],lineHeight=0;
- function wrap(size){
-   ctx.font=size+"px Arial";const out=[];
-   for(const line of lines){
-     let current="";
-     for(let word of line.split(/\s+/)){
-       if(!word)continue;
-       if(ctx.measureText(word).width>max){
-         if(current){out.push(current);current="";}
-         let p="";for(const ch of word){if(p&&ctx.measureText(p+ch).width>max){out.push(p);p="";}p+=ch;}if(p)out.push(p);
-         continue;
-       }
-       const next=current?current+" "+word:word;
-       if(current&&ctx.measureText(next).width>max){out.push(current);current=word;}else current=next;
-     }
-     if(current)out.push(current);
-   }
-   return out;
+
+function rowsOf(name,address){return [name,address?.line1,address?.line2,address?.cityStatePostal,address?.country].map(x=>String(x||"").trim()).filter(Boolean)}
+// Native TSPL font 2 is 12 x 20 dots, substantially smaller than raster print jobs.
+const textSubstitutions={"’":"'","‘":"'","–":"-","—":"-","“":'"',"”":'"',"œ":"oe","Œ":"OE","æ":"ae","Æ":"AE"};
+function cleanText(value){
+ return [...String(value)].map(ch=>{
+  const n=ch.codePointAt(0);
+  if(ch==='"'||ch==="\\"||ch==="\n"||ch==="\r")return " ";
+  if((n>=32&&n<=126)||(n>=160&&n<=255))return ch;
+  if(textSubstitutions[ch]!==undefined)return textSubstitutions[ch];
+  throw Error("Unsupported address character "+ch+". Verify this address before printing.");
+ }).join("").replace(/\s+/g," ").trim();
+}
+function codepage1252(value){
+ const buf=new Uint8Array(value.length);
+ for(let i=0;i<value.length;i++)buf[i]=value.charCodeAt(i);
+ return buf;
+}
+function layoutLines(rows,maxChars){
+ const out=[];
+ for(const raw of rows){
+  const words=cleanText(raw).split(/\s+/).filter(Boolean);
+  let current="";
+  for(const word of words){
+   if(word.length>maxChars)throw Error("Address contains a word too long for the physical label: "+word);
+   const next=current?current+" "+word:word;
+   if(next.length>maxChars){out.push(current);current=word;}else current=next;
+  }
+  if(current)out.push(current);
  }
- while(font>=17){linesOut=wrap(font);lineHeight=Math.ceil(font*1.22);if(margin+36+linesOut.length*lineHeight<=canvas.height-margin)break;font--;}
- if(font<17)throw Error("Address does not fit. Use a larger label or shorten the address.");
- ctx.textBaseline="top";ctx.font="bold 26px Arial";ctx.fillText(title,margin,margin);
- ctx.font=font+"px Arial";let y=margin+36;for(const line of linesOut){ctx.fillText(line,margin,y);y+=lineHeight;}
- return rgbaToBitmap(ctx.getImageData(0,0,canvas.width,canvas.height).data,canvas.width,canvas.height);
+ return out;
 }
-export function pagesForOrder(order,settings){
+export function encodeTextLabel(title,lines,widthIn=2.25,heightIn=1.25){
+ const w=Math.round(widthIn*DPI),h=Math.round(heightIn*DPI),m=20,top=17;
+ if(w<440||w>875||h<250||h>1259)throw Error("Invalid thermal label dimensions");
+ const rows=layoutLines(lines,Math.floor((w-2*m)/12));
+ if(!rows.length)throw Error("Cannot print a blank address label.");
+ if(top+33+rows.length*27>h-9)throw Error("Address has "+rows.length+" lines and does not fit "+widthIn+" x "+heightIn+" inches. No labels sent.");
+ const cmds=[
+  "SIZE "+(widthIn*25.4).toFixed(2)+" mm,"+(heightIn*25.4).toFixed(2)+" mm",
+  "GAP 3 mm,0 mm","DIRECTION 0,0","REFERENCE 0,0","CODEPAGE 1252","CLS",
+  'TEXT '+m+','+top+',"3",0,1,1,"'+cleanText(title)+'"'
+ ];
+ let y=top+33;
+ for(const line of rows){cmds.push('TEXT '+m+','+y+',"2",0,1,1,"'+line+'"');y+=27;}
+ cmds.push("PRINT 1,1");
+ return {bytes:codepage1252(cmds.join("\r\n")+"\r\n"),lines:rows};
+}
+export function commandsForOrder(order,settings){
  const w=Number(settings.labelWidth)||2.25,h=Number(settings.labelHeight)||1.25;
- if(w<2.2||w>4.3||h<1.25||h>6.2)throw Error("Invalid thermal label size.");
  const from=rowsOf(settings.returnName,settings.returnAddress),to=rowsOf(order.shipTo?.name,order.shipTo);
- if(from.length<3)throw Error("Add your return name and full address in Business details first.");
- if(to.length<3)throw Error("Recipient address is incomplete. Check this eBay order.");
- return [render("Ship from",from,w,h),render("Ship to",to,w,h)];
+ if(from.length<3)throw Error("Enter a complete return address in Business details.");
+ if(to.length<3)throw Error("Recipient address is incomplete. Check the eBay order.");
+ return [encodeTextLabel("Ship from",from,w,h),encodeTextLabel("Ship to",to,w,h)];
 }
-export function testPage(settings){return render("PIKO TEST",["Bluetooth test","No buyer data","Check label alignment"],Number(settings.labelWidth)||2.25,Number(settings.labelHeight)||1.25);}
+export function testPage(settings){
+ return encodeTextLabel("PIKO TEST",["Bluetooth test","Check all lines","Check alignment"],Number(settings.labelWidth)||2.25,Number(settings.labelHeight)||1.25);
+}
 export async function printPages(pages,settings){
  if(busy)throw Error("Another print job is active.");
  if(!isPrinterConnected())throw Error("Connect MUNBYN Bluetooth first.");
- if(pages.length===0||pages.length>50)throw Error("Select 1–25 orders.");
+ if(pages.length===0||pages.length>50)throw Error("Select 1-25 orders");
  busy=true;let attempted=false;
  try{
-   for(let i=0;i<pages.length;i++){
-     const bytes=encodeTspl(pages[i],Number(settings.labelWidth)||2.25,Number(settings.labelHeight)||1.25);
-     report("Sending label "+(i+1)+" of "+pages.length+"…");
-     for(let pos=0;pos<bytes.length;pos+=128){
-       if(!isPrinterConnected())throw Error("Bluetooth disconnected.");
-       attempted=true;
-       await writer.writeValueWithResponse(bytes.subarray(pos,Math.min(pos+128,bytes.length)));
-       await delay(12);
-     }
-     await delay(1000);
+  for(let i=0;i<pages.length;i++){
+   const data=pages[i].bytes||encodeTspl(pages[i],Number(settings.labelWidth)||2.25,Number(settings.labelHeight)||1.25);
+   report("Sending label "+(i+1)+" of "+pages.length+"...");
+   for(let pos=0;pos<data.length;pos+=64){
+    if(!isPrinterConnected())throw Error("MUNBYN disconnected");
+    attempted=true;
+    await writer.writeValueWithResponse(data.subarray(pos,Math.min(pos+64,data.length)));
+    await delay(32);
    }
-   report(pages.length+" label(s) transmitted. Check the paper to confirm printing.","success");
- }catch(e){
-   report((attempted?"Transmission may have partially printed. Check the paper before retrying. ":"")+e.message,"error");throw e;
- }finally{busy=false;}
+   await delay(1300);
+  }
+  report(pages.length+" label(s) transmitted. Confirm each address line printed.","success");
+ }catch(e){report((attempted?"Part of the job may have printed; check paper before retrying. ":"")+e.message,"error");throw e}
+ finally{busy=false}
 }
 export async function printOrders(orders,settings){
  if(!orders.length||orders.length>25)throw Error("Select between 1 and 25 orders.");
- const pages=orders.flatMap(o=>pagesForOrder(o,settings)); // prevalidate before sending
+ const pages=orders.flatMap(o=>commandsForOrder(o,settings)); // validate every label before sending
  await printPages(pages,settings);
 }
