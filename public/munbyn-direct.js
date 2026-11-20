@@ -68,8 +68,14 @@ export async function connectPrinter(){
 export async function reconnectRememberedPrinter(){
  if(manualStop||isPrinterConnected())return isPrinterConnected();
  if(!webBluetoothSupported())return false;
+ // Within the same open tab, re-use the live BluetoothDevice object even when
+ // experimental persistent permissions are unavailable.
+ if(device?.gatt&&!device.gatt.connected){
+   try{await openGatt(device);return true}
+   catch(e){report("Reconnecting saved device in this tab failed: "+(e?.message||"Unknown error"),"warning")}
+ }
  if(typeof navigator.bluetooth.getDevices!=="function"){
-   report("This Chrome version cannot restore Bluetooth automatically. Tap Connect after refresh.","warning");
+   report("Chrome blocks restore after page refresh. Enable Experimental Web Platform features and Web Bluetooth new permissions backend in chrome://flags, then relaunch and Connect once.","warning");
    return false;
  }
  try{

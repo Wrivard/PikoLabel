@@ -61,3 +61,26 @@ test("revoked permission never triggers unexpected device picker",async()=>{
  try{assert.equal(await mod.reconnectRememberedPrinter(),false)}
  finally{Object.defineProperty(globalThis,"navigator",{configurable:true,value:oldN});globalThis.localStorage=oldS}
 });
+
+test("reconnect reuses a cached device within same tab when getDevices is unavailable",async()=>{
+ const mod=await import("../public/munbyn-direct.js?same-tab");
+ const oldN=globalThis.navigator,oldS=globalThis.localStorage;
+ const store=new Map(),events=new Map();
+ let calls=0;
+ const characteristic={properties:{write:true},async writeValueWithResponse(){}};
+ const dev={id:"cached-id",name:"MUNBYN",gatt:{
+   connected:false,async connect(){this.connected=true;calls++;return this},
+   async getPrimaryService(){return {async getCharacteristic(){return characteristic}}},
+   disconnect(){this.connected=false}
+ },addEventListener:(name,cb)=>events.set(name,cb)};
+ Object.defineProperty(globalThis,"navigator",{configurable:true,value:{bluetooth:{async requestDevice(){return dev}}}});
+ globalThis.localStorage={getItem:k=>store.get(k)||null,setItem:(k,v)=>store.set(k,v),removeItem:k=>store.delete(k)};
+ try{
+   await mod.connectPrinter();
+   dev.gatt.connected=false;
+   events.get("gattserverdisconnected")?.();
+   assert.equal(await mod.reconnectRememberedPrinter(),true);
+   assert.equal(calls,2);
+   assert.equal(mod.isPrinterConnected(),true);
+ }finally{Object.defineProperty(globalThis,"navigator",{configurable:true,value:oldN});globalThis.localStorage=oldS}
+});
