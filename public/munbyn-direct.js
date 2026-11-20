@@ -162,8 +162,8 @@ function concat(parts){const size=parts.reduce((n,x)=>n+x.length,0),out=new Uint
 export function encodeTspl(bitmap,widthIn,heightIn){
  const header=TE.encode("SIZE "+(widthIn*25.4).toFixed(2)+" mm,"+(heightIn*25.4).toFixed(2)+" mm\r\nGAP 3 mm,0 mm\r\nDIRECTION 0,0\r\nREFERENCE 0,0\r\nCLS\r\n");
  const parts=[header];
- for(let y=0;y<bitmap.height;y+=32){
-   const rows=Math.min(32,bitmap.height-y);
+ for(let y=0;y<bitmap.height;y+=16){
+   const rows=Math.min(16,bitmap.height-y);
    parts.push(TE.encode("BITMAP 0,"+y+","+bitmap.stride+","+rows+",0,"));
    parts.push(bitmap.bytes.subarray(y*bitmap.stride,(y+rows)*bitmap.stride));
    parts.push(TE.encode("\r\n"));
@@ -203,47 +203,50 @@ function layoutLines(rows,maxChars){
  }
  return out;
 }
-export function encodeTextLabel(title,lines,widthIn=2.25,heightIn=1.25){
- const w=Math.round(widthIn*DPI),h=Math.round(heightIn*DPI);
- if(w<440||w>875||h<250||h>1259)throw Error("Invalid thermal label dimensions");
- // Native TSPL font 4 (24x32 pixels) is substantially more readable.
- // Fall back to font 3 (16x24) only for addresses that need more room.
- // Never silently crop a row: if neither fits, refuse the print.
- const options=[
-  {font:"4",glyphWidth:24,height:32,lineHeight:35,headingSpace:41,margin:13},
-  {font:"3",glyphWidth:16,height:24,lineHeight:29,headingSpace:34,margin:16}
- ];
- const top=12,headerFont="4";
- let chosen=null;
- for(const option of options){
-  try{
-   const rows=layoutLines(lines,Math.floor((w-2*option.margin)/option.glyphWidth));
-   const fits=top+option.headingSpace+rows.length*option.lineHeight<=h-8;
-   if(rows.length&&fits){chosen={...option,rows};break}
-  }catch(e){if(!/too long for the physical label/.test(String(e.message)))throw e}
- }
- if(!chosen)throw Error("Address cannot fit legibly on "+widthIn+" x "+heightIn+" inches. No labels sent. Use a larger label.");
- const {rows,margin,font,lineHeight,headingSpace}=chosen;
- const cmds=[
-  "SIZE "+(widthIn*25.4).toFixed(2)+" mm,"+(heightIn*25.4).toFixed(2)+" mm",
-  "GAP 3 mm,0 mm","DIRECTION 0,0","REFERENCE 0,0","CODEPAGE 1252","CLS",
-  'TEXT '+margin+','+top+',"'+headerFont+'",0,1,1,"'+cleanText(title)+'"'
- ];
- let y=top+headingSpace;
- for(const line of rows){cmds.push('TEXT '+margin+','+y+',"'+font+'",0,1,1,"'+line+'"');y+=lineHeight}
- cmds.push("PRINT 1,1");
- return {bytes:codepage1252(cmds.join("\r\n")+"\r\n"),lines:rows,font};
-}
 
-export function commandsForOrder(order,settings){
+export function layoutAddress(lines,width,height,measure=(t,size)=>t.length*size*.53){
+ const margin=25,top=17;
+ for(let size=28;size>=17;size--){
+  const rows=[];let invalid=false;
+  for(const line of lines){
+   let part="";
+   for(const word of String(line).split(/\s+/).filter(Boolean)){
+    if(measure(word,size)>width-2*margin){invalid=true;break}
+    const next=part?part+" "+word:word;
+    if(part&&measure(next,size)>width-2*margin){rows.push(part);part=word}else part=next;
+   }
+   if(invalid)break;
+   if(part)rows.push(part);
+  }
+  if(invalid)continue;
+  const lineHeight=Math.ceil(size*1.22),bodyTop=top+38;
+  const bottom=bodyTop+rows.length*lineHeight+8;
+  if(rows.length&&bottom<=height-9)return {rows,size,lineHeight,top,margin,bodyTop,bottom};
+ }
+ throw Error("Address does not fit on this label. No labels sent.");
+}
+function renderArial(title,lines,w,h){
+ const canvas=document.createElement("canvas");
+ canvas.width=Math.round(w*DPI);canvas.height=Math.round(h*DPI);
+ const ctx=canvas.getContext("2d",{willReadFrequently:true});
+ if(!ctx)throw Error("Canvas unsupported.");
+ const layout=layoutAddress(lines,canvas.width,canvas.height,(t,s)=>{ctx.font=s+"px Arial";return ctx.measureText(t).width});
+ ctx.fillStyle="#fff";ctx.fillRect(0,0,canvas.width,canvas.height);
+ ctx.fillStyle="#000";ctx.textBaseline="top";
+ ctx.font="bold 26px Arial";ctx.fillText(title,layout.margin,layout.top);
+ ctx.font=layout.size+"px Arial";
+ let y=layout.bodyTop;for(const line of layout.rows){ctx.fillText(line,layout.margin,y);y+=layout.lineHeight}
+ const height=Math.min(canvas.height,layout.bottom);
+ return rgbaToBitmap(ctx.getImageData(0,0,canvas.width,height).data,canvas.width,height);
+}
+export function pagesForOrder(order,settings){
  const w=Number(settings.labelWidth)||2.25,h=Number(settings.labelHeight)||1.25;
  const from=rowsOf(settings.returnName,settings.returnAddress),to=rowsOf(order.shipTo?.name,order.shipTo);
- if(from.length<3)throw Error("Enter a complete return address in Business details.");
- if(to.length<3)throw Error("Recipient address is incomplete. Check the eBay order.");
- return [encodeTextLabel("Ship from",from,w,h),encodeTextLabel("Ship to",to,w,h)];
+ if(from.length<3||to.length<3)throw Error("Return or recipient address is incomplete. No labels sent.");
+ return [renderArial("Ship from",from,w,h),renderArial("Ship to",to,w,h)];
 }
 export function testPage(settings){
- return encodeTextLabel("PIKO TEST",["Bluetooth test","Check all lines","Check alignment"],Number(settings.labelWidth)||2.25,Number(settings.labelHeight)||1.25);
+ return renderArial("PIKO TEST",["Bluetooth test","Arial original font","Check all lines"],Number(settings.labelWidth)||2.25,Number(settings.labelHeight)||1.25);
 }
 export async function printPages(pages,settings){
  if(busy)throw Error("Another print job is active.");
@@ -254,11 +257,11 @@ export async function printPages(pages,settings){
   for(let i=0;i<pages.length;i++){
    const data=pages[i].bytes||encodeTspl(pages[i],Number(settings.labelWidth)||2.25,Number(settings.labelHeight)||1.25);
    report("Sending label "+(i+1)+" of "+pages.length+"...");
-   for(let pos=0;pos<data.length;pos+=64){
+   for(let pos=0;pos<data.length;pos+=20){
     if(!isPrinterConnected())throw Error("MUNBYN disconnected");
     attempted=true;
-    await writer.writeValueWithResponse(data.subarray(pos,Math.min(pos+64,data.length)));
-    await delay(32);
+    await writer.writeValueWithResponse(data.subarray(pos,Math.min(pos+20,data.length)));
+    await delay(22);
    }
    await delay(1300);
   }
@@ -268,6 +271,6 @@ export async function printPages(pages,settings){
 }
 export async function printOrders(orders,settings){
  if(!orders.length||orders.length>25)throw Error("Select between 1 and 25 orders.");
- const pages=orders.flatMap(o=>commandsForOrder(o,settings)); // validate every label before sending
+ const pages=orders.flatMap(o=>pagesForOrder(o,settings)); // validate before printing
  await printPages(pages,settings);
 }

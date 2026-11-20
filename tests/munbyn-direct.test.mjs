@@ -118,37 +118,14 @@ test("out-of-range error is recovered using an advertisement and retry",async()=
  }
 });
 
-test("native TSPL contains full recipient address and no bulky bitmap",async()=>{
- const {encodeTextLabel}=await import("../public/munbyn-direct.js");
- const label=encodeTextLabel("Ship to",["Sample Buyer","PO Box 1256","Calgary, AB T2A 2B2","Canada"]);
- const str=Array.from(label.bytes,x=>String.fromCharCode(x)).join("");
- for(const word of ["Sample","Buyer","PO","Box","1256","Calgary,","AB","T2A","2B2","Canada"])assert.ok(label.lines.join(" ").includes(word),word);
- assert.ok(str.includes("CODEPAGE 1252"));
- assert.ok(!str.includes("BITMAP"));
- assert.ok(label.bytes.length<1300);
- assert.ok(str.endsWith("PRINT 1,1\r\n"));
-});
-test("address that cannot fit fails before sending",async()=>{
- const {encodeTextLabel}=await import("../public/munbyn-direct.js");
- assert.throws(()=>encodeTextLabel("Ship to",Array.from({length:11},(_,i)=>"Line "+i)),/cannot fit|does not fit/);
-});
-test("native printer text preserves accented names in code page 1252",async()=>{
- const {encodeTextLabel}=await import("../public/munbyn-direct.js");
- const label=encodeTextLabel("Ship to",["Élodie","Montréal QC","Canada"]);
- assert.ok(label.bytes.includes(201));assert.ok(label.bytes.includes(233));
-});
 
-test("the default 2.25 x 1.25 address label uses readable font 4 if it fits",async()=>{
- const {encodeTextLabel}=await import("../public/munbyn-direct.js");
- const page=encodeTextLabel("Ship to",["Justin Ritchie","PO Box 1256","Indian Head, SK S0G 2K0","Canada"]);
- assert.equal(page.font,"4");
- assert.ok(page.lines.length>=4);
- const txt=Array.from(page.bytes,x=>String.fromCharCode(x)).join("");
- assert.ok(txt.includes('"4",0,1,1'));
+test("original Arial layout keeps its previous 28px size for normal addresses",async()=>{
+ const {layoutAddress}=await import("../public/munbyn-direct.js");
+ const l=layoutAddress(["William Rivard","340 rue huard","Sorel-Tracy, QC J3P 6E1","Canada"],457,254);
+ assert.equal(l.size,28);
+ assert.ok(l.rows.join(" ").includes("J3P 6E1"));
 });
-test("long address falls back to font 3 or fails instead of clipping",async()=>{
- const {encodeTextLabel}=await import("../public/munbyn-direct.js");
- const page=encodeTextLabel("Ship to",["John Doe","PO Box 1234","Indian Head, Saskatchewan S0G 2K0","Canada"]);
- assert.ok(["3","4"].includes(page.font));
- assert.ok(page.lines.join(" ").includes("Saskatchewan"));
+test("long addresses must fit before a label is sent",async()=>{
+ const {layoutAddress}=await import("../public/munbyn-direct.js");
+ assert.throws(()=>layoutAddress(Array.from({length:20},()=> "Some lengthy address line"),457,254),/does not fit/);
 });
