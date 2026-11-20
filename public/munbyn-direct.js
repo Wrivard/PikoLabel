@@ -154,7 +154,9 @@ export function rgbaToBitmap(rgba,width,height){
  for(let y=0;y<height;y++)for(let x=0;x<width;x++){
    const i=4*(y*width+x),a=rgba[i+3]/255;
    const gray=a*(.2126*rgba[i]+.7152*rgba[i+1]+.0722*rgba[i+2])+(1-a)*255;
-   if(gray<160)output[y*stride+(x>>3)]&=~(128>>(x&7)); // TSPL 0=black
+   // Include antialiased gray edge pixels: thin serif strokes were disappearing at 203 DPI.
+   // Keep the same Times New Roman font, font size and centered layout.
+   if(gray<208)output[y*stride+(x>>3)]&=~(128>>(x&7)); // TSPL 0=black
  }
  return {bytes:output,stride,height};
 }

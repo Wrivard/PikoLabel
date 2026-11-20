@@ -215,3 +215,13 @@ test("main order printing and sample use the same Word-style raster renderer",as
   assert.ok(drawn.every(x=>x.font.includes("Times New Roman")));
  }finally{globalThis.document=prevDocument}
 });
+
+test("thermal serif edges are preserved at 203 DPI without changing original font",()=>{
+ const samples=[255,225,207,190,160,30];
+ const data=new Uint8ClampedArray(samples.length*4);
+ for(let i=0;i<samples.length;i++){data[i*4]=samples[i];data[i*4+1]=samples[i];data[i*4+2]=samples[i];data[i*4+3]=255;}
+ const image=rgbaToBitmap(data,samples.length,1);
+ assert.equal(image.stride,1);
+ // Pixels 207, 190, 160 and 30 must become ink; paper white remains white.
+ assert.equal(image.bytes[0],0b11000011);
+});
