@@ -1,0 +1,21 @@
+
+.books-screen{padding-bottom:65px}.books-top{display:flex;align-items:start;justify-content:space-between;gap:16px}
+.books-top p{color:#737880;font-size:13px;margin-top:6px}.books-year{min-width:94px}
+.books-year label{font-size:11px;color:#666;display:block}.books-year select{width:100%;padding:9px}
+.books-summary{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px;margin:18px 0}
+.books-summary>div{background:#f7f7f8;border:1px solid #e8e9eb;border-radius:10px;padding:14px}
+.books-summary small{display:block;color:#777;font-size:11px}.books-summary strong{display:block;font-size:22px;margin-top:6px}
+.books-layout{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:16px}
+.books-card{border:1px solid #e5e7eb;border-radius:12px;padding:18px;min-width:0}
+.books-card h3{font-size:16px;margin:0 0 14px}.books-drop{border:1px dashed #a3a6ac;border-radius:12px;padding:26px 12px;text-align:center;cursor:pointer;background:#fafafa}
+.books-drop.active{border-color:#222;background:#f3f3f3}.books-drop strong{display:block;font-size:13px}.books-drop span{font-size:11px;color:#777;display:block;margin-top:6px}
+.books-filename{font-size:12px;color:#777;margin:8px 0}.books-fields{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px}
+.books-card label{display:block;font-size:12px;color:#444;margin:10px 0}
+.books-card input:not([type=checkbox]),.books-card select,.books-card textarea{width:100%;box-sizing:border-box;border:1px solid #ddd;border-radius:7px;padding:10px;margin-top:5px;background:white;color:#222;font:13px system-ui}
+.books-card .primary{margin-top:12px;width:100%}.books-check{display:flex!important;align-items:center;gap:8px}
+.books-help{font-size:11px!important;line-height:1.55;color:#777;margin-top:12px}.books-list-head{display:flex;align-items:center;justify-content:space-between}
+.books-entry{display:flex;align-items:start;justify-content:space-between;border-bottom:1px solid #eee;padding:12px 0;gap:8px;font-size:12px}
+.books-entry small{display:block;color:#888;margin-top:5px}.books-entry strong{white-space:nowrap}
+.books-taxes summary{font-size:12px;cursor:pointer;color:#666}
+@media(max-width:750px){.books-layout{grid-template-columns:1fr}.books-summary{grid-template-columns:1fr 1fr}.books-summary strong{font-size:18px}}
+@media(max-width:420px){.books-summary{grid-template-columns:1fr}.books-fields{grid-template-columns:1fr}}
