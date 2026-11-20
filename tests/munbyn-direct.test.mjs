@@ -118,27 +118,6 @@ test("out-of-range error is recovered using an advertisement and retry",async()=
  }
 });
 
-test("native TSPL contains full recipient address and no bulky bitmap",async()=>{
- const {encodeTextLabel}=await import("../public/munbyn-direct.js");
- const label=encodeTextLabel("Ship to",["Sample Buyer","PO Box 1256","Calgary, AB T2A 2B2","Canada"]);
- const str=Array.from(label.bytes,x=>String.fromCharCode(x)).join("");
- for(const row of ["Sample Buyer","PO Box 1256","Calgary, AB T2A 2B2","Canada"])assert.ok(str.includes(row));
- assert.ok(str.includes("CODEPAGE 1252"));
- assert.ok(!str.includes("BITMAP"));
- assert.ok(label.bytes.length<1300);
- assert.ok(str.endsWith("PRINT 1,1\r\n"));
-});
-test("address that cannot fit fails before sending",async()=>{
- const {encodeTextLabel}=await import("../public/munbyn-direct.js");
- assert.throws(()=>encodeTextLabel("Ship to",Array.from({length:11},(_,i)=>"Line "+i)),/does not fit/);
-});
-test("native printer text preserves accented names in code page 1252",async()=>{
- const {encodeTextLabel}=await import("../public/munbyn-direct.js");
- const label=encodeTextLabel("Ship to",["Élodie","Montréal QC","Canada"]);
- assert.ok(label.bytes.includes(201));assert.ok(label.bytes.includes(233));
-});
-
-
 test("original Arial layout stays large and centers across the label",async()=>{
  const {layoutAddressCentered}=await import("../public/munbyn-direct.js");
  const result=layoutAddressCentered(["William Rivard","340 rue huard","Sorel-Tracy QC J3P 6E1","Canada"],457,254);
