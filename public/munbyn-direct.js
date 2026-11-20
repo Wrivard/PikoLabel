@@ -249,6 +249,23 @@ export function pagesForOrder(order,settings){
  if(from.length<3||to.length<3)throw Error("Return or recipient address is incomplete. No labels sent.");
  return [rasterLabel("Ship from",from,w,h),rasterLabel("Ship to",to,w,h)];
 }
+
+/** TSPL2 ROMAN.TTF trial; no customer details or raster bitmap transfer. */
+export function wordStyleFontTest(settings){
+ const w=Number(settings.labelWidth)||2.25,h=Number(settings.labelHeight)||1.25;
+ if(w<2.2||h<1.25)throw Error("Invalid label size");
+ const cmds=[
+  "SIZE "+(w*25.4).toFixed(2)+" mm,"+(h*25.4).toFixed(2)+" mm",
+  "GAP 3 mm,0 mm","DIRECTION 0,0","REFERENCE 0,0","CODEPAGE 1252","CLS",
+  'TEXT 24,16,"ROMAN.TTF",0,23,23,"Ship from"',
+  'TEXT 24,60,"ROMAN.TTF",0,23,23,"William Rivard"',
+  'TEXT 24,98,"ROMAN.TTF",0,23,23,"340 rue huard"',
+  'TEXT 24,136,"ROMAN.TTF",0,23,23,"Sorel-Tracy QC"',
+  'TEXT 24,174,"ROMAN.TTF",0,23,23,"Canada"',
+  "PRINT 1,1"
+ ];
+ return {bytes:codepage1252(cmds.join("\r\n")+"\r\n")};
+}
 export function testPage(settings){
  return encodeReliableLabel("PIKO TEST",["Bluetooth test","Clear native font","Centered text"],Number(settings.labelWidth)||2.25,Number(settings.labelHeight)||1.25);
 }

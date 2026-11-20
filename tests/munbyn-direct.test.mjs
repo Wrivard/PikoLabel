@@ -174,3 +174,12 @@ test("both labels are generated as lightweight independent jobs",async()=>{
  assert.ok(recipient.includes("Justin Ritchie"));
  assert.ok(recipient.includes("PO Box 1256"));
 });
+
+test("experimental Word-style font trial is compact and contains no buyer address",async()=>{
+ const {wordStyleFontTest}=await import("../public/munbyn-direct.js");
+ const page=wordStyleFontTest({labelWidth:2.25,labelHeight:1.25});
+ const out=Array.from(page.bytes,x=>String.fromCharCode(x)).join("");
+ assert.ok(out.includes('"ROMAN.TTF"'));
+ assert.ok(out.includes("PRINT 1,1"));
+ assert.ok(page.bytes.length<700);
+});
