@@ -30,6 +30,8 @@ jobs:
         run: node --test tests/munbyn-direct.test.mjs
       - name: Verify frontend loads orders and eBay connection
         run: node --test tests/ui-startup.test.mjs
+      - name: Verify 42-card one-page packing slips
+        run: node --test tests/packing-density.test.mjs
       - name: Generate PDFs
         run: |
           node --input-type=module -e '
