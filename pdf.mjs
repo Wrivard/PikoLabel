@@ -106,10 +106,10 @@ export function packingPdf(orders,settings){
  const pages=orders.map(order=>{
   const plan=planPackingItems(order.items||[]);
   let c='0 0 0 RG 0 0 0 rg\n';
-  c+=text(m,744,settings.storeName||'PIKO CARDS',21,true);
+  c+=text(m,744,settings.storeName||'PIKO CARDS',18,true);
   c+=text(400,744,'PACKING SLIP',11,true);
   c+=text(400,726,'Order '+(order.displayId||order.id),8);
-  c+=line(m,711,w-m,711,.9);
+  c+='0.7 G\n';c+=line(m,711,w-m,711,.35);c+='0 G\n';
   c+=text(m,692,'SHIP TO',9,true);c+=text(327,692,'SHIP FROM',9,true);
   let left=677,right=677;
   for(const value of addressLines(order.shipTo?.name,order.shipTo))for(const row of wrap(value,245,9.2,80)){c+=text(m,left,row,9.2);left-=12;}
@@ -117,20 +117,20 @@ export function packingPdf(orders,settings){
   if(left<593||right<593)throw Error('An address is too long for a one-page packing slip.');
   c+=text(m,583,'Buyer: '+(order.buyer||'-'),8.5);
   c+=text(327,583,'Date: '+String(order.createdAt||'').slice(0,10),8.5);
-  c+=line(m,569,w-m,569,.55);
+  c+='0.7 G\n';c+=line(m,569,w-m,569,.3);c+='0 G\n';
   c+=text(m,555,'ITEMS ('+plan.count+' listings, '+plan.total+' cards)',8.5,true);
-  c+=line(m,548,w-m,548,.35);
+  c+='0.8 G\n';c+=line(m,548,w-m,548,.25);c+='0 G\n';
   for(let col=0;col<plan.laid.length;col++){
    const x=m+col*(plan.colW+11);
    let y=535;
    for(const entry of plan.laid[col]){
-    for(let i=0;i<entry.rows.length;i++){c+=text(x,y,entry.rows[i],plan.font,i===0);y-=plan.font+1;}
+    for(let i=0;i<entry.rows.length;i++){c+=text(x,y,entry.rows[i],plan.font,false);y-=plan.font+1;}
     c+=text(x+2,y,String(entry.item.quantity??1)+' x  '+(money(entry.item.price)||'-'),Math.max(6,plan.font-1));
     y-=entry.height-entry.rows.length*(plan.font+1);
    }
    if(y<170)throw Error('Packing slip items extend into totals; no items omitted.');
   }
-  c+=line(m,151,w-m,151,.6);
+  c+='0.7 G\n';c+=line(m,151,w-m,151,.35);c+='0 G\n';
   c+=text(380,136,'Shipping',8.5);c+=text(480,136,money(order.shippingCost)||'-',8.5);
   c+=text(380,121,'Total',9,true);c+=text(480,121,money(order.total)||'-',9,true);
   c+=text(m,105,'A MESSAGE FROM PIKO CARDS',8,true);

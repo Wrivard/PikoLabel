@@ -40,3 +40,14 @@ test("very long listings refuse printing rather than silently dropping items",()
  tooBig.items=tooBig.items.map((item)=>({...item,title:item.title+" with very long additional descriptive text"}));
  assert.throws(()=>packingPdf([tooBig],settings),/cannot fit|too much/i);
 });
+
+test("economy packing slip uses lighter separators but preserves all 42 listings",()=>{
+ const o=order(42),bytes=packingPdf([o],settings).toString("latin1");
+ assert.match(bytes,/\/Count 1/);
+ assert.ok(bytes.includes("0.7 G"));
+ assert.ok(bytes.includes("0.8 G"));
+ for(const card of [1,21,42]){
+   const title="Pokemon Card "+String(card).padStart(2,"0");
+   assert.ok(bytes.includes(Buffer.from(title).toString("hex").toUpperCase()),title);
+ }
+});
