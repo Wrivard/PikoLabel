@@ -86,7 +86,7 @@ export function labelsPdf(orders,settings){
 const money=(obj)=>{if(!obj||obj.value==null)return '';const n=Number(obj.value);return Number.isFinite(n)?`${n.toFixed(2)} ${obj.currency||'CAD'}`:'';};
 export function planPackingItems(items){
  const list=Array.isArray(items)?items:[];
- const columns=list.length<=13?1:list.length<=26?2:3;
+ const columns=list.length<=13?1:list.length<=26?2:list.length<=38?3:4;
  const colW=(526-(columns-1)*11)/columns;
  for(const font of [8.2,7.5,7,6.5,6.1]){
   const groupSize=Math.ceil(list.length/columns);

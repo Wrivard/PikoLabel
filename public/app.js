@@ -110,7 +110,7 @@ function canonSlipHtml(orders,s){
  const address=(name,addr)=>[name,addr?.line1,addr?.line2,addr?.cityStatePostal,addr?.country].filter(Boolean).map(safe).join("<br>");
  const price=x=>x?.value!=null?safe(Number(x.value).toFixed(2)+" "+(x.currency||"CAD")):"-";
  const pages=orders.map(o=>{
-  const entries=o.items||[],cols=entries.length<=13?1:entries.length<=26?2:3,groupSize=Math.ceil(entries.length/cols);
+  const entries=o.items||[],cols=entries.length<=13?1:entries.length<=26?2:entries.length<=38?3:4,groupSize=Math.ceil(entries.length/cols);
   const cards=entries.reduce((n,i)=>n+(Number(i.quantity)||0),0);
   const groups=Array.from({length:cols},(_,k)=>entries.slice(k*groupSize,(k+1)*groupSize));
   const items=groups.map(group=>"<div class=\"item-column\">"+group.map(i=>"<div class=\"item-row\"><div class=\"item-title\">"+safe(i.title)+"</div><div class=\"item-meta\">"+safe(i.quantity)+" × "+price(i.price)+"</div></div>").join("")+"</div>").join("");
