@@ -137,3 +137,18 @@ test("native printer text preserves accented names in code page 1252",async()=>{
  const label=encodeTextLabel("Ship to",["Élodie","Montréal QC","Canada"]);
  assert.ok(label.bytes.includes(201));assert.ok(label.bytes.includes(233));
 });
+
+test("the default 2.25 x 1.25 address label uses readable font 4 if it fits",async()=>{
+ const {encodeTextLabel}=await import("../public/munbyn-direct.js");
+ const page=encodeTextLabel("Ship to",["Justin Ritchie","PO Box 1256","Indian Head, SK S0G 2K0","Canada"]);
+ assert.equal(page.font,"4");
+ assert.ok(page.lines.length>=4);
+ const txt=Array.from(page.bytes,x=>String.fromCharCode(x)).join("");
+ assert.ok(txt.includes('"4",0,1,1'));
+});
+test("long address falls back to font 3 or fails instead of clipping",async()=>{
+ const {encodeTextLabel}=await import("../public/munbyn-direct.js");
+ const page=encodeTextLabel("Ship to",["John Doe","PO Box 1234","Indian Head, Saskatchewan S0G 2K0","Canada"]);
+ assert.ok(["3","4"].includes(page.font));
+ assert.ok(page.lines.join(" ").includes("Saskatchewan"));
+});

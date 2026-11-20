@@ -204,21 +204,37 @@ function layoutLines(rows,maxChars){
  return out;
 }
 export function encodeTextLabel(title,lines,widthIn=2.25,heightIn=1.25){
- const w=Math.round(widthIn*DPI),h=Math.round(heightIn*DPI),m=20,top=17;
+ const w=Math.round(widthIn*DPI),h=Math.round(heightIn*DPI);
  if(w<440||w>875||h<250||h>1259)throw Error("Invalid thermal label dimensions");
- const rows=layoutLines(lines,Math.floor((w-2*m)/12));
- if(!rows.length)throw Error("Cannot print a blank address label.");
- if(top+33+rows.length*27>h-9)throw Error("Address has "+rows.length+" lines and does not fit "+widthIn+" x "+heightIn+" inches. No labels sent.");
+ // Native TSPL font 4 (24x32 pixels) is substantially more readable.
+ // Fall back to font 3 (16x24) only for addresses that need more room.
+ // Never silently crop a row: if neither fits, refuse the print.
+ const options=[
+  {font:"4",glyphWidth:24,height:32,lineHeight:35,headingSpace:41,margin:13},
+  {font:"3",glyphWidth:16,height:24,lineHeight:29,headingSpace:34,margin:16}
+ ];
+ const top=12,headerFont="4";
+ let chosen=null;
+ for(const option of options){
+  try{
+   const rows=layoutLines(lines,Math.floor((w-2*option.margin)/option.glyphWidth));
+   const fits=top+option.headingSpace+rows.length*option.lineHeight<=h-8;
+   if(rows.length&&fits){chosen={...option,rows};break}
+  }catch(e){if(!/too long for the physical label/.test(String(e.message)))throw e}
+ }
+ if(!chosen)throw Error("Address cannot fit legibly on "+widthIn+" x "+heightIn+" inches. No labels sent. Use a larger label.");
+ const {rows,margin,font,lineHeight,headingSpace}=chosen;
  const cmds=[
   "SIZE "+(widthIn*25.4).toFixed(2)+" mm,"+(heightIn*25.4).toFixed(2)+" mm",
   "GAP 3 mm,0 mm","DIRECTION 0,0","REFERENCE 0,0","CODEPAGE 1252","CLS",
-  'TEXT '+m+','+top+',"3",0,1,1,"'+cleanText(title)+'"'
+  'TEXT '+margin+','+top+',"'+headerFont+'",0,1,1,"'+cleanText(title)+'"'
  ];
- let y=top+33;
- for(const line of rows){cmds.push('TEXT '+m+','+y+',"2",0,1,1,"'+line+'"');y+=27;}
+ let y=top+headingSpace;
+ for(const line of rows){cmds.push('TEXT '+margin+','+y+',"'+font+'",0,1,1,"'+line+'"');y+=lineHeight}
  cmds.push("PRINT 1,1");
- return {bytes:codepage1252(cmds.join("\r\n")+"\r\n"),lines:rows};
+ return {bytes:codepage1252(cmds.join("\r\n")+"\r\n"),lines:rows,font};
 }
+
 export function commandsForOrder(order,settings){
  const w=Number(settings.labelWidth)||2.25,h=Number(settings.labelHeight)||1.25;
  const from=rowsOf(settings.returnName,settings.returnAddress),to=rowsOf(order.shipTo?.name,order.shipTo);
