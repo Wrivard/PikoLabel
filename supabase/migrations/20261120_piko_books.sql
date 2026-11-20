@@ -13,6 +13,7 @@ create table if not exists public.piko_books_expenses (
  payment_source text not null check(payment_source in ('personal','business')),
  seller_receipt boolean not null default false,
  proof_path text,
+ proof_paths text[] not null default '{}',
  source text not null default 'manual',
  created_at timestamptz not null default now()
 );

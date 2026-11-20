@@ -3,7 +3,7 @@ const el=id=>document.getElementById(id);
 const txt=v=>String(v??"");
 const h=v=>txt(v).replace(/[&<>"']/g,x=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[x]));
 const cad=c=>new Intl.NumberFormat("en-CA",{style:"currency",currency:"CAD"}).format(Number(c||0)/100);
-let pendingFile=null,enabled=false,busy=false;
+let pendingFiles=[],enabled=false,busy=false;
 async function api(name,opts={}){
  const r=await fetch("/api/books/"+name,{credentials:"same-origin",...opts});
  const json=await r.json();
@@ -19,13 +19,13 @@ function smartCategory(text){
  if(/ebay fee|promoted listing/.test(s))return "platform_fees";
  return "inventory";
 }
-function showFile(file){
- if(!file)return;
- pendingFile=file;
- el("books-file-name").textContent=file.name+" ("+(file.size/1024).toFixed(0)+" KB)";
- if(!el("books-description").value)el("books-description").value=file.name.replace(/\.[^.]+$/,"").replace(/[_-]+/g," ");
- el("books-category").value=smartCategory((file.name||"")+" "+el("books-seller").value);
- if(file.size>2000000)status("File is larger than 2 MB. Compress it before saving.",true);
+function showFiles(files){
+ if(!files||!files.length)return;
+ pendingFiles=Array.from(files).slice(0,6);
+ el("books-file-name").textContent=pendingFiles.map(x=>x.name).join(" · ");
+ if(!el("books-description").value)el("books-description").value=pendingFiles[0].name.replace(/\.[^.]+$/,"").replace(/[_-]+/g," ");
+ el("books-category").value=smartCategory(pendingFiles[0].name+" "+el("books-seller").value);
+ if(pendingFiles.some(f=>f.size>2000000))status("Some files exceed 2 MB. Compress them before saving.",true);
 }
 export function initializeBooks(){
  const now=new Date();
@@ -34,10 +34,10 @@ export function initializeBooks(){
  const input=el("books-file"),drop=el("books-drop");
  drop.onclick=()=>input.click();
  drop.onkeydown=e=>{if(e.key==="Enter"||e.key===" "){e.preventDefault();input.click()}};
- input.onchange=()=>showFile(input.files[0]);
+ input.onchange=()=>showFiles(input.files);
  drop.ondragover=e=>{e.preventDefault();drop.classList.add("active")};
  drop.ondragleave=()=>drop.classList.remove("active");
- drop.ondrop=e=>{e.preventDefault();drop.classList.remove("active");showFile(e.dataTransfer.files[0])};
+ drop.ondrop=e=>{e.preventDefault();drop.classList.remove("active");showFiles(e.dataTransfer.files)};
  el("books-year").onchange=refreshBooks;
  el("books-export").onclick=async()=>{
   if(!enabled)return status("Connect the dedicated Books database before exporting.",true);
@@ -61,7 +61,7 @@ export async function refreshBooks(){
   el("books-summary").innerHTML='<div><small>Operating purchases</small><strong>'+cad(sum.operating)+'</strong></div>'+
    '<div><small>Inventory acquired</small><strong>'+cad(sum.inventory)+'</strong></div>'+
    '<div><small>Missing proof</small><strong>'+Number(sum.missing||0)+'</strong></div>';
-  el("books-list").innerHTML=data.entries.length?data.entries.map(x=>'<article class="books-entry"><div><b>'+h(x.description)+'</b><small>'+h(x.expense_date)+' · '+h(x.seller||x.category)+' · '+h(x.payment_source)+'</small></div><strong>'+cad(x.amount_cents)+'</strong></article>').join(""):'<p>No purchases recorded yet.</p>';
+  el("books-list").innerHTML=data.entries.length?data.entries.map(x=>'<article class="books-entry"><div><b>'+h(x.description)+'</b><small>'+h(x.expense_date)+' · '+h(x.seller||x.category)+' · '+h(x.payment_source)+' · '+((x.proof_paths||[]).length||Number(!!x.proof_path))+' file(s)</small></div><strong>'+cad(x.amount_cents)+'</strong></article>').join(""):'<p>No purchases recorded yet.</p>';
  }catch(error){
   enabled=false;
   el("books-summary").innerHTML="";
@@ -84,12 +84,12 @@ async function save(e){
  const btn=el("books-save");
  busy=true;btn.disabled=true;btn.textContent="Saving…";
  try{
-  let path="";
-  if(pendingFile){
-   if(pendingFile.size>2000000)throw Error("Receipt exceeds the 2 MB upload limit.");
+  const paths=[];
+  for(const file of pendingFiles){
+   if(file.size>2000000)throw Error("Each proof file must be under 2 MB.");
    const upload=await api("upload",{method:"POST",headers:{"Content-Type":"application/json"},
-    body:JSON.stringify({mime:pendingFile.type,name:pendingFile.name,base64:await fileAsBase64(pendingFile)})});
-   path=upload.path;
+     body:JSON.stringify({mime:file.type,name:file.name,base64:await fileAsBase64(file)})});
+   paths.push(upload.path);
   }
   const entry={
    date:el("books-date").value,
@@ -102,10 +102,10 @@ async function save(e){
    gst:el("books-gst").value,
    qst:el("books-qst").value,
    seller_receipt:el("books-receipt").checked,
-   proof_path:path
+   proof_path:paths[0]||"",proof_paths:paths
   };
   await api("add",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(entry)});
-  el("books-form").reset();pendingFile=null;el("books-file-name").textContent="";
+  el("books-form").reset();pendingFiles=[];el("books-file-name").textContent="";
   status("Purchase saved with its evidence. No GST/QST credit is assumed.");
   await refreshBooks();
  }catch(error){status(error.message,true)}
