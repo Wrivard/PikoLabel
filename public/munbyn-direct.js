@@ -314,8 +314,43 @@ export async function printPages(pages,settings){
   busy=false;
  }
 }
+
+/** Fast, reliable TSPL text mode. No multi-kilobyte bitmap stream.
+ * Text rows remain left-aligned in a block centered on the physical label.
+ * This font is built into the printer (not the optional Arial bitmap renderer).
+ */
+export function encodeReliableLabel(title,sourceLines,widthIn=2.25,heightIn=1.25){
+ const width=Math.round(widthIn*DPI),height=Math.round(heightIn*DPI);
+ if(width<440||width>875||height<250||height>1259)throw Error("Invalid thermal label dimensions.");
+ const margin=18,headingFont=3,headingWidth=16,headingHeight=24;
+ const bodyFont=3,glyphWidth=16,rowHeight=29;
+ const maxChars=Math.floor((width-2*margin)/glyphWidth);
+ const lines=layoutLines(sourceLines,maxChars);
+ if(!lines.length)throw Error("Address is missing.");
+ const blockHeight=headingHeight+12+lines.length*rowHeight;
+ if(blockHeight>height-2*margin)throw Error("Address does not fit at a readable font size. No labels sent.");
+ const biggest=Math.max(title.length*headingWidth,...lines.map(line=>line.length*glyphWidth));
+ const left=Math.max(margin,Math.round((width-biggest)/2));
+ const top=Math.round((height-blockHeight)/2);
+ const commands=[
+  "SIZE "+(widthIn*25.4).toFixed(2)+" mm,"+(heightIn*25.4).toFixed(2)+" mm",
+  "GAP 3 mm,0 mm","DIRECTION 0,0","REFERENCE 0,0","CODEPAGE 1252","CLS",
+  'TEXT '+left+','+top+',"3",0,1,1,"'+cleanText(title)+'"'
+ ];
+ let y=top+headingHeight+12;
+ for(const line of lines){commands.push('TEXT '+left+','+y+',"3",0,1,1,"'+line+'"');y+=rowHeight}
+ commands.push("PRINT 1,1");
+ return {bytes:codepage1252(commands.join("\r\n")+"\r\n"),lines,left,top,font:bodyFont,width,height,blockHeight};
+}
+export function reliablePagesForOrder(order,settings){
+ const w=Number(settings.labelWidth)||2.25,h=Number(settings.labelHeight)||1.25;
+ const from=rowsOf(settings.returnName,settings.returnAddress);
+ const to=rowsOf(order.shipTo?.name,order.shipTo);
+ if(from.length<3||to.length<3)throw Error("Return or recipient address incomplete; no labels sent.");
+ return [encodeReliableLabel("Ship from",from,w,h),encodeReliableLabel("Ship to",to,w,h)];
+}
 export async function printOrders(orders,settings){
  if(!orders.length||orders.length>25)throw Error("Select between 1 and 25 orders.");
- const pages=orders.flatMap(o=>pagesForOrder(o,settings)); // validate both labels before sending
+ const pages=orders.flatMap(o=>reliablePagesForOrder(o,settings)); // compact, proven BLE text protocol
  await printPages(pages,settings);
 }
