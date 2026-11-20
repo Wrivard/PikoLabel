@@ -1,3 +1,4 @@
+import {initializeBooks,refreshBooks} from "./books.js";
 import {connectPrinter,reconnectRememberedPrinter,disconnectPrinter,isPrinterConnected,webBluetoothSupported,setPrinterStatusListener,wordStyleFontTest,printPages,printOrders} from "./munbyn-direct.js";
 const $=id=>document.getElementById(id),state={orders:[],selected:new Set(),settings:{},auth:{},demo:true,view:"label",urls:[],docs:{packing:true,labels:true},previewUrl:null,previewSeq:0,previewTimer:null,screen:"orders"};const esc=s=>String(s??"").replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));const money=v=>v?.value!=null?Number(v.value).toFixed(2)+" "+(v.currency||"CAD"):"";const qty=o=>(o.items||[]).reduce((n,i)=>n+Number(i.quantity||0),0);const toast=message=>{$("toast").textContent=message;setTimeout(()=>$("toast").textContent="",4000)};
 async function call(path,options={}){const r=await fetch("/api/"+path,{credentials:"same-origin",headers:{"Content-Type":"application/json"},...options}),t=r.headers.get("content-type")||"",v=t.includes("json")?await r.json():await r.text();if(!r.ok)throw Error(v.error||"Request failed");return v}
@@ -57,9 +58,9 @@ async function renderPdfPreview(order,seq){
   if(old)setTimeout(()=>URL.revokeObjectURL(old),1000);
  }catch(e){if(seq!==state.previewSeq)return;$("preview-doc").replaceChildren();$("preview-status").textContent="Unable to preview PDF: "+e.message}
 }
-function screen(v){state.screen=v;$("tablet-dock").classList.toggle("hidden",v!=="orders");$("orders-screen").classList.toggle("hidden",v!=="orders");$("settings-screen").classList.toggle("hidden",v!=="settings");$("tab-orders").classList.toggle("on",v==="orders");$("tab-settings").classList.toggle("on",v==="settings");$("title").textContent=v==="orders"?"Shipping workspace":"Settings"}
+function screen(v){state.screen=v;$("tablet-dock").classList.toggle("hidden",v!=="orders");$("orders-screen").classList.toggle("hidden",v!=="orders");$("settings-screen").classList.toggle("hidden",v!=="settings");$("books-screen").classList.toggle("hidden",v!=="books");$("tab-books").classList.toggle("on",v==="books");if(v==="books")void refreshBooks();$("tab-orders").classList.toggle("on",v==="orders");$("tab-settings").classList.toggle("on",v==="settings");$("title").textContent=v==="orders"?"Shipping workspace":v==="books"?"Books":"Settings"}
 $("login-form").onsubmit=async e=>{e.preventDefault();$("login-error").textContent="";try{await call("login",{method:"POST",body:JSON.stringify({password:$("password").value,remember:$("remember-browser").checked})});$("password").value="";await initialize()}catch(e){$("login-error").textContent=e.message}};
-$("tab-orders").onclick=()=>screen("orders");$("tab-settings").onclick=()=>screen("settings");$("refresh").onclick=reload;$("reload").onclick=reload;$("search").oninput=render;$("all").onchange=e=>{for(const o of filtered())e.target.checked?state.selected.add(o.id):state.selected.delete(o.id);render()};$("view-label").onclick=()=>{state.view="label";queuePreview()};$("view-slip").onclick=()=>{state.view="slip";queuePreview()};
+$("tab-orders").onclick=()=>screen("orders");$("tab-books").onclick=()=>screen("books");$("tab-settings").onclick=()=>screen("settings");$("refresh").onclick=reload;$("reload").onclick=reload;$("search").oninput=render;$("all").onchange=e=>{for(const o of filtered())e.target.checked?state.selected.add(o.id):state.selected.delete(o.id);render()};$("view-label").onclick=()=>{state.view="label";queuePreview()};$("view-slip").onclick=()=>{state.view="slip";queuePreview()};
 for(const [id,kind] of [["include-packing","packing"],["include-labels","labels"]])$(id).onchange=e=>{state.docs[kind]=e.target.checked;localStorage.setItem("piko-doc-choices",JSON.stringify(state.docs));updatePrintControls()};
 $("tablet-print").onclick=()=>$("print").click();
 let settingsVersion=0,savedVersion=0,saveTimer=null,saveRunning=false;
@@ -273,7 +274,7 @@ function bluetoothStatus(message,type="info"){
  $("direct-connect").textContent=isPrinterConnected()?"MUNBYN connected ✓":"Connect MUNBYN Bluetooth";
  $("direct-print").disabled=!state.selected.size||state.directBusy||state.working;
 }
-setPrinterStatusListener(bluetoothStatus);
+setPrinterStatusListener(bluetoothStatus);initializeBooks();
 async function directConnect(){
  try{await connectPrinter();bluetoothStatus("MUNBYN connected. Print one test label first.","success");}
  catch(e){bluetoothStatus(e.message,"error");}
