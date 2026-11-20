@@ -252,26 +252,67 @@ export function pagesForOrder(order,settings){
 export function testPage(settings){
  return rasterLabel("PIKO TEST",["Arial font test","Large centered text","Print alignment"],Number(settings.labelWidth)||2.25,Number(settings.labelHeight)||1.25);
 }
+
+export class BluetoothWriteTimeout extends Error {
+ constructor(label,chunk){super("MUNBYN stopped responding while sending label "+label+" (packet "+chunk+"). Bluetooth connection reset. Check the paper before retrying.");this.name="BluetoothWriteTimeout"}
+}
+// A browser GATT promise can remain pending when the printer stops responding.
+// Never issue another write after timeout on the old connection: disconnect it.
+export async function writeChunkWithTimeout(characteristic,chunk,{timeoutMs=7000,label=1,packet=1,onTimeout=()=>{}}={}){
+ let timer;
+ const pending=Promise.resolve().then(()=>characteristic.writeValueWithResponse(chunk));
+ // Observe a late rejection even when timeout has already won the race.
+ pending.catch(()=>{});
+ const timeout=new Promise((_,reject)=>{
+  timer=setTimeout(()=>{
+   try{onTimeout()}catch{}
+   reject(new BluetoothWriteTimeout(label,packet));
+  },timeoutMs);
+ });
+ try{return await Promise.race([pending,timeout]);}
+ finally{clearTimeout(timer)}
+}
 export async function printPages(pages,settings){
  if(busy)throw Error("Another print job is active.");
  if(!isPrinterConnected())throw Error("Connect MUNBYN Bluetooth first.");
- if(pages.length===0||pages.length>50)throw Error("Select 1-25 orders");
- busy=true;let attempted=false;
+ if(!Array.isArray(pages)||pages.length<1||pages.length>50)throw Error("Select 1-25 orders.");
+ // Pre-encode everything before sending the first label, avoiding partial
+ // print jobs caused by a later label failing validation.
+ const jobs=pages.map(page=>page.bytes||encodeTspl(page,Number(settings.labelWidth)||2.25,Number(settings.labelHeight)||1.25));
+ busy=true;
+ let written=0;
  try{
-  for(let i=0;i<pages.length;i++){
-   const data=pages[i].bytes||encodeTspl(pages[i],Number(settings.labelWidth)||2.25,Number(settings.labelHeight)||1.25);
-   report("Sending label "+(i+1)+" of "+pages.length+"...");
-   for(let pos=0;pos<data.length;pos+=20){
-    if(!isPrinterConnected())throw Error("MUNBYN disconnected");
-    attempted=true;
-    await writer.writeValueWithResponse(data.subarray(pos,Math.min(pos+20,data.length)));
+  for(let i=0;i<jobs.length;i++){
+   const data=jobs[i],packetSize=20;
+   const packetCount=Math.ceil(data.length/packetSize);
+   report("Sending label "+(i+1)+" of "+jobs.length+" — 0%…");
+   for(let pos=0;pos<data.length;pos+=packetSize){
+    if(!isPrinterConnected())throw Error("MUNBYN disconnected during print. Check the paper before retrying.");
+    const packet=Math.floor(pos/packetSize)+1;
+    written++;
+    await writeChunkWithTimeout(writer,data.subarray(pos,Math.min(pos+packetSize,data.length)),{
+     timeoutMs:7000,label:i+1,packet,
+     onTimeout:()=>{
+      writer=null;
+      try{device?.gatt?.disconnect()}catch{}
+     }
+    });
+    // Update progress sparingly to avoid UI jank on Android.
+    if(packet%30===0||packet===packetCount){
+     report("Sending label "+(i+1)+" of "+jobs.length+" — "+Math.round(packet/packetCount*100)+"%…");
+    }
     await delay(25);
    }
+   report("Label "+(i+1)+" of "+jobs.length+" transmitted. Waiting for paper feed…");
    await delay(1300);
   }
-  report(pages.length+" label(s) transmitted. Confirm each address line printed.","success");
- }catch(e){report((attempted?"Part of the job may have printed; check paper before retrying. ":"")+e.message,"error");throw e}
- finally{busy=false}
+  report("Both address labels transmitted. Verify the complete addresses on paper.","success");
+ }catch(e){
+  report((written?"Some data may already have printed; check the labels before retrying. ":"")+e.message,"error");
+  throw e;
+ }finally{
+  busy=false;
+ }
 }
 export async function printOrders(orders,settings){
  if(!orders.length||orders.length>25)throw Error("Select between 1 and 25 orders.");
