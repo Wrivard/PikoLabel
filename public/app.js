@@ -1,3 +1,4 @@
+import {connectPrinter,disconnectPrinter,isPrinterConnected,webBluetoothSupported,setPrinterStatusListener,testPage,printPages,printOrders} from "./munbyn-direct.js";
 const $=id=>document.getElementById(id),state={orders:[],selected:new Set(),settings:{},auth:{},demo:true,view:"label",urls:[],docs:{packing:true,labels:true},previewUrl:null,previewSeq:0,previewTimer:null,screen:"orders"};const esc=s=>String(s??"").replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));const money=v=>v?.value!=null?Number(v.value).toFixed(2)+" "+(v.currency||"CAD"):"";const qty=o=>(o.items||[]).reduce((n,i)=>n+Number(i.quantity||0),0);const toast=message=>{$("toast").textContent=message;setTimeout(()=>$("toast").textContent="",4000)};
 async function call(path,options={}){const r=await fetch("/api/"+path,{credentials:"same-origin",headers:{"Content-Type":"application/json"},...options}),t=r.headers.get("content-type")||"",v=t.includes("json")?await r.json():await r.text();if(!r.ok)throw Error(v.error||"Request failed");return v}
 const addr=(name,a)=>[name,a?.line1,a?.line2,a?.cityStatePostal,a?.country].filter(Boolean).map(esc).join("<br>");
@@ -10,7 +11,7 @@ async function initialize(){try{state.auth=await call("bootstrap");$("login").cl
     Object.assign(state.settings,{labelWidth:2.25,labelHeight:1.25,labelGap:0,labelMargin:.14,labelFont:10,labelBorder:false,labelProfile:"word"});
   } else if(stored.labelProfile==="word" && Number(stored.labelWidth)===4){
     Object.assign(state.settings,{labelWidth:2.25,labelHeight:1.25,labelGap:0,labelMargin:.14,labelFont:10,labelBorder:false,labelProfile:"word"});
-  }try{state.docs={packing:true,labels:true,...JSON.parse(localStorage.getItem("piko-doc-choices")||"{}")}}catch{};$("include-packing").checked=state.docs.packing;$("include-labels").checked=state.docs.labels;populate();$("business-saved").textContent="Changes save automatically on this browser (not across devices).";await reload()}catch(e){toast(e.message)}}
+  }try{state.docs={packing:true,labels:true,...JSON.parse(localStorage.getItem("piko-doc-choices")||"{}")}}catch{};$("include-packing").checked=state.docs.packing;$("include-labels").checked=state.docs.labels;$("direct-print").disabled=!count||busy||state.directBusy;populate();$("business-saved").textContent="Changes save automatically on this browser (not across devices).";await reload()}catch(e){toast(e.message)}}
 function populate(){const s=state.settings,a=s.returnAddress||{};for(const [id,v] of Object.entries({storeName:s.storeName,returnName:s.returnName,line1:a.line1,line2:a.line2,cityStatePostal:a.cityStatePostal,country:a.country,thanks:s.thankYouMessage,width:s.labelWidth,height:s.labelHeight,font:s.labelFont,gap:s.labelGap}))$(id).value=v??"";$("border").checked=s.labelBorder!==false;$("labelPreset").value=s.labelProfile||((Number(s.labelWidth)===2.25&&Number(s.labelHeight)===1.25)?"word":"custom");$("connect").innerHTML=state.auth.connected?'<button id="disconnect" class="ghost">Disconnect eBay</button>':state.auth.ebayConfigured?'<a href="/api/oauth/start">Connect eBay →</a>':'<p>To connect real orders, add EBAY_CLIENT_ID, EBAY_CLIENT_SECRET, EBAY_RUNAME, APP_PASSWORD and APP_SECRET in Vercel settings.</p>';if($("disconnect"))$("disconnect").onclick=async()=>{await call("disconnect",{method:"POST"});location.reload()}}
 async function reload(){try{let result=await call("orders");state.orders=result.orders;state.demo=result.demo;$("status").textContent=result.demo?"Demo mode":"eBay connected";$("status").className="pill "+(result.demo?"":"live");state.selected=new Set([...state.selected].filter(id=>state.orders.some(o=>o.id===id)));render()}catch(e){toast(e.message)}}
 const filtered=()=>state.orders.filter(o=>JSON.stringify(o).toLowerCase().includes($("search").value.toLowerCase()));
@@ -171,5 +172,37 @@ $("calibration").onclick=async()=>{
 };
 $("test-canon").onclick=()=>testPrinter("letter");
 $("test-munbyn").onclick=()=>testPrinter("label");
+// BLE only: Android's system print destination list cannot connect to this proprietary printer.
+function bluetoothStatus(message,type="info"){
+ for(const id of ["bluetooth-status","direct-print-status"]){$(id).textContent=message;$(id).dataset.status=type;}
+ $("direct-test").disabled=!isPrinterConnected()||state.directBusy;
+ $("direct-disconnect").disabled=!isPrinterConnected()||state.directBusy;
+ $("direct-connect").textContent=isPrinterConnected()?"MUNBYN connected ✓":"Connect MUNBYN Bluetooth";
+ $("direct-print").disabled=!state.selected.size||state.directBusy||state.working;
+}
+setPrinterStatusListener(bluetoothStatus);
+async function directConnect(){
+ try{await connectPrinter();bluetoothStatus("MUNBYN connected. Print one test label first.","success");}
+ catch(e){bluetoothStatus(e.message,"error");}
+}
+$("direct-connect").onclick=directConnect;
+$("direct-disconnect").onclick=()=>{try{disconnectPrinter()}catch(e){bluetoothStatus(e.message,"error")}};
+$("direct-test").onclick=async()=>{
+ state.directBusy=true;updatePrintControls();bluetoothStatus("Preparing one calibration label…");
+ try{await printPages([testPage(state.settings)],state.settings)}
+ catch(e){bluetoothStatus(e.message,"error")}
+ finally{state.directBusy=false;updatePrintControls();bluetoothStatus(isPrinterConnected()?"Connected: check your last print result.":"Disconnected.");}
+};
+$("direct-print").onclick=async()=>{
+ const orders=state.orders.filter(o=>state.selected.has(o.id));
+ if(!orders.length)return;
+ // Call the BLE device chooser from the user gesture if the printer was not connected.
+ const connection=isPrinterConnected()?Promise.resolve():connectPrinter();
+ state.directBusy=true;updatePrintControls();
+ try{await connection;await printOrders(orders,state.settings);}
+ catch(e){bluetoothStatus(e.message,"error");}
+ finally{state.directBusy=false;updatePrintControls();}
+};
+if(!webBluetoothSupported())bluetoothStatus("Direct Bluetooth requires Chrome on Android, and may not work on every printer firmware.","warning");
 $("tablet-dock").classList.remove("hidden");
 initialize();

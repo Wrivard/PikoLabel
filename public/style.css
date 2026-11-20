@@ -101,3 +101,14 @@ input[type=checkbox]{width:19px;height:19px;accent-color:#1c1c1c;flex:none}
 .settings-save-status{font-size:12px!important;line-height:1.6;color:#6d727a;margin:8px 0}
 .settings-save-status.save-error{color:#b3261e!important}
 @media(max-width:530px){.business-save-row{display:block}.business-save-row .primary{width:100%}}
+
+/* Native BLE path for MUNBYN ITPP130B; PDFs remain available independently. */
+.direct-print-button{display:block;width:100%;min-height:47px;margin:10px 0;background:#fff;color:#1f2328;border:1px solid #ced1d7;border-radius:9px;font-size:12px;font-weight:750;padding:12px;cursor:pointer}
+.direct-print-button:hover:not(:disabled){background:#f3f4f5}
+.direct-print-button:disabled{opacity:.5;cursor:not-allowed}
+.bt-controls{display:flex;gap:8px;flex-wrap:wrap;margin:16px 0 10px}
+.bt-controls .printer-button{width:auto;min-height:42px;flex:1 1 145px;font-size:12px}
+.bt-status{font-size:11px!important;line-height:1.6;margin:9px 0 15px;color:#747880}
+.bt-status[data-status="error"]{color:#aa2432!important}
+.bt-status[data-status="success"]{color:#287446!important}
+.bt-status[data-status="warning"]{color:#96620f!important}

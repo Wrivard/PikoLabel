@@ -21,10 +21,13 @@ jobs:
           test -f api/orders.js
           test -f api/documents/labels.js
           node --check public/app.js
+          node --check public/munbyn-direct.js
           node --check lib/api.mjs
           for f in api/*.js api/oauth/*.js api/documents/*.js; do node --check "$f"; done
       - name: Verify remembered-browser session, renewal and logout
         run: node --test tests/session.test.mjs
+      - name: Test direct Bluetooth TSPL encoder
+        run: node --test tests/munbyn-direct.test.mjs
       - name: Generate PDFs
         run: |
           node --input-type=module -e '
