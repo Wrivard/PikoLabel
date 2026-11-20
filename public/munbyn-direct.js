@@ -159,30 +159,14 @@ export function rgbaToBitmap(rgba,width,height){
  return {bytes:output,stride,height};
 }
 function concat(parts){const size=parts.reduce((n,x)=>n+x.length,0),out=new Uint8Array(size);let i=0;for(const p of parts){out.set(p,i);i+=p.length;}return out;}
-// Generate narrow bitmap stripes for only pixels with ink. A full, mostly-white
-// 2.25 x 1.25 inch label would otherwise require thousands of BLE writes.
 export function encodeTspl(bitmap,widthIn,heightIn){
- if(!bitmap||!(bitmap.bytes instanceof Uint8Array)||bitmap.stride<1||bitmap.height<1||bitmap.bytes.length<bitmap.stride*bitmap.height)throw Error("Invalid label bitmap");
  const header=TE.encode("SIZE "+(widthIn*25.4).toFixed(2)+" mm,"+(heightIn*25.4).toFixed(2)+" mm\r\nGAP 3 mm,0 mm\r\nDIRECTION 0,0\r\nREFERENCE 0,0\r\nCLS\r\n");
  const parts=[header];
- const ink=[];
- for(let y=0;y<bitmap.height;y++){
-  let min=bitmap.stride,max=-1;
-  for(let x=0;x<bitmap.stride;x++)if(bitmap.bytes[y*bitmap.stride+x]!==255){min=Math.min(min,x);max=x}
-  ink.push({min,max});
- }
- // Group neighboring rows with ink; do not transmit blank rows. Keep each
- // stripe at most 6 rows, and crop each stripe to its ink's bounding columns.
- for(let y=0;y<bitmap.height;){
-  if(ink[y].max<0){y++;continue}
-  const from=y;
-  let min=bitmap.stride,max=0;
-  while(y<bitmap.height&&ink[y].max>=0&&y-from<6){min=Math.min(min,ink[y].min);max=Math.max(max,ink[y].max);y++}
-  const rows=y-from,width=max-min+1,pixels=new Uint8Array(rows*width);
-  for(let dy=0;dy<rows;dy++)pixels.set(bitmap.bytes.subarray((from+dy)*bitmap.stride+min,(from+dy)*bitmap.stride+max+1),dy*width);
-  parts.push(TE.encode("BITMAP "+(min*8)+","+from+","+width+","+rows+",0,"));
-  parts.push(pixels);
-  parts.push(TE.encode("\r\n"));
+ for(let y=0;y<bitmap.height;y+=32){
+   const rows=Math.min(32,bitmap.height-y);
+   parts.push(TE.encode("BITMAP 0,"+y+","+bitmap.stride+","+rows+",0,"));
+   parts.push(bitmap.bytes.subarray(y*bitmap.stride,(y+rows)*bitmap.stride));
+   parts.push(TE.encode("\r\n"));
  }
  parts.push(TE.encode("PRINT 1,1\r\n"));
  return concat(parts);
@@ -219,82 +203,55 @@ function layoutLines(rows,maxChars){
  }
  return out;
 }
-
-export function layoutAddress(lines,width,height,measure=(t,size)=>t.length*size*.53){
- const margin=25,top=17;
- for(let size=28;size>=17;size--){
-  const rows=[];let invalid=false;
-  for(const line of lines){
-   let part="";
-   for(const word of String(line).split(/\s+/).filter(Boolean)){
-    if(measure(word,size)>width-2*margin){invalid=true;break}
-    const next=part?part+" "+word:word;
-    if(part&&measure(next,size)>width-2*margin){rows.push(part);part=word}else part=next;
-   }
-   if(invalid)break;
-   if(part)rows.push(part);
-  }
-  if(invalid)continue;
-  const lineHeight=Math.ceil(size*1.22),bodyTop=top+38;
-  const bottom=bodyTop+rows.length*lineHeight+8;
-  if(rows.length&&bottom<=height-9)return {rows,size,lineHeight,top,margin,bodyTop,bottom};
- }
- throw Error("Address does not fit on this label. No labels sent.");
+export function encodeTextLabel(title,lines,widthIn=2.25,heightIn=1.25){
+ const w=Math.round(widthIn*DPI),h=Math.round(heightIn*DPI),m=20,top=17;
+ if(w<440||w>875||h<250||h>1259)throw Error("Invalid thermal label dimensions");
+ const rows=layoutLines(lines,Math.floor((w-2*m)/12));
+ if(!rows.length)throw Error("Cannot print a blank address label.");
+ if(top+33+rows.length*27>h-9)throw Error("Address has "+rows.length+" lines and does not fit "+widthIn+" x "+heightIn+" inches. No labels sent.");
+ const cmds=[
+  "SIZE "+(widthIn*25.4).toFixed(2)+" mm,"+(heightIn*25.4).toFixed(2)+" mm",
+  "GAP 3 mm,0 mm","DIRECTION 0,0","REFERENCE 0,0","CODEPAGE 1252","CLS",
+  'TEXT '+m+','+top+',"3",0,1,1,"'+cleanText(title)+'"'
+ ];
+ let y=top+33;
+ for(const line of rows){cmds.push('TEXT '+m+','+y+',"2",0,1,1,"'+line+'"');y+=27;}
+ cmds.push("PRINT 1,1");
+ return {bytes:codepage1252(cmds.join("\r\n")+"\r\n"),lines:rows};
 }
-function renderArial(title,lines,w,h){
- const canvas=document.createElement("canvas");
- canvas.width=Math.round(w*DPI);canvas.height=Math.round(h*DPI);
- const ctx=canvas.getContext("2d",{willReadFrequently:true});
- if(!ctx)throw Error("Canvas unsupported.");
- const layout=layoutAddress(lines,canvas.width,canvas.height,(t,s)=>{ctx.font=s+"px Arial";return ctx.measureText(t).width});
- ctx.fillStyle="#fff";ctx.fillRect(0,0,canvas.width,canvas.height);
- ctx.fillStyle="#000";ctx.textBaseline="top";
- ctx.font="bold 26px Arial";ctx.fillText(title,layout.margin,layout.top);
- ctx.font=layout.size+"px Arial";
- let y=layout.bodyTop;for(const line of layout.rows){ctx.fillText(line,layout.margin,y);y+=layout.lineHeight}
- const height=Math.min(canvas.height,layout.bottom);
- return rgbaToBitmap(ctx.getImageData(0,0,canvas.width,height).data,canvas.width,height);
-}
-export function pagesForOrder(order,settings){
+export function commandsForOrder(order,settings){
  const w=Number(settings.labelWidth)||2.25,h=Number(settings.labelHeight)||1.25;
  const from=rowsOf(settings.returnName,settings.returnAddress),to=rowsOf(order.shipTo?.name,order.shipTo);
- if(from.length<3||to.length<3)throw Error("Return or recipient address is incomplete. No labels sent.");
- return [renderArial("Ship from",from,w,h),renderArial("Ship to",to,w,h)];
+ if(from.length<3)throw Error("Enter a complete return address in Business details.");
+ if(to.length<3)throw Error("Recipient address is incomplete. Check the eBay order.");
+ return [encodeTextLabel("Ship from",from,w,h),encodeTextLabel("Ship to",to,w,h)];
 }
 export function testPage(settings){
- return renderArial("PIKO TEST",["Bluetooth test","Arial original font","Check all lines"],Number(settings.labelWidth)||2.25,Number(settings.labelHeight)||1.25);
+ return encodeTextLabel("PIKO TEST",["Bluetooth test","Check all lines","Check alignment"],Number(settings.labelWidth)||2.25,Number(settings.labelHeight)||1.25);
 }
-// Each BLE write is acknowledged before continuing; errors stop the batch.
 export async function printPages(pages,settings){
  if(busy)throw Error("Another print job is active.");
  if(!isPrinterConnected())throw Error("Connect MUNBYN Bluetooth first.");
- if(!Array.isArray(pages)||pages.length===0||pages.length>50)throw Error("Select 1-25 orders.");
- const jobs=pages.map(page=>page.bytes||encodeTspl(page,Number(settings.labelWidth)||2.25,Number(settings.labelHeight)||1.25));
- busy=true;
- let attempted=false;
+ if(pages.length===0||pages.length>50)throw Error("Select 1-25 orders");
+ busy=true;let attempted=false;
  try{
-  for(let i=0;i<jobs.length;i++){
-   const bytes=jobs[i];
-   report("Sending MUNBYN label "+(i+1)+"/"+jobs.length+" ("+bytes.length+" bytes)…");
-   // 20-byte writes work on BLE connections with the default minimum MTU.
-   for(let pos=0;pos<bytes.length;pos+=20){
-    if(!isPrinterConnected())throw Error("MUNBYN Bluetooth disconnected. Check paper before retrying.");
+  for(let i=0;i<pages.length;i++){
+   const data=pages[i].bytes||encodeTspl(pages[i],Number(settings.labelWidth)||2.25,Number(settings.labelHeight)||1.25);
+   report("Sending label "+(i+1)+" of "+pages.length+"...");
+   for(let pos=0;pos<data.length;pos+=64){
+    if(!isPrinterConnected())throw Error("MUNBYN disconnected");
     attempted=true;
-    await writer.writeValueWithResponse(bytes.subarray(pos,Math.min(pos+20,bytes.length)));
-    if(pos%600===0)report("Sending MUNBYN label "+(i+1)+"/"+jobs.length+": "+Math.round(100*pos/bytes.length)+"%…");
-    await delay(16);
+    await writer.writeValueWithResponse(data.subarray(pos,Math.min(pos+64,data.length)));
+    await delay(32);
    }
-   report("Label "+(i+1)+"/"+jobs.length+" transmitted; letting MUNBYN feed paper.");
-   await delay(1500);
+   await delay(1300);
   }
-  report("All "+jobs.length+" MUNBYN labels transmitted. Confirm the addresses on the paper.","success");
- }catch(error){
-  report((attempted?"Printing may be partial; check paper before retrying. ":"")+error.message,"error");
-  throw error;
- }finally{busy=false}
+  report(pages.length+" label(s) transmitted. Confirm each address line printed.","success");
+ }catch(e){report((attempted?"Part of the job may have printed; check paper before retrying. ":"")+e.message,"error");throw e}
+ finally{busy=false}
 }
 export async function printOrders(orders,settings){
  if(!orders.length||orders.length>25)throw Error("Select between 1 and 25 orders.");
- const pages=orders.flatMap(o=>pagesForOrder(o,settings)); // validate before printing
+ const pages=orders.flatMap(o=>commandsForOrder(o,settings)); // validate every label before sending
  await printPages(pages,settings);
 }

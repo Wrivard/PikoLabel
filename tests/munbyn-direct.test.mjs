@@ -9,11 +9,11 @@ test("bitmap uses TSPL white=1 and black=0, padded white",()=>{
  assert.deepEqual([...bitmap.bytes],[0x7f,0xff]);
 });
 test("TSPL stream has exact physical size, bitmap payload, and one print",()=>{
- const bitmap={bytes:new Uint8Array([0,255,0,255]),stride:2,height:2};
+ const bitmap={bytes:new Uint8Array(4).fill(255),stride:2,height:2};
  const command=encodeTspl(bitmap,2.25,1.25);
  const text=new TextDecoder().decode(command);
  assert.ok(text.includes("SIZE 57.15 mm,31.75 mm"));
- assert.ok(text.includes("BITMAP 0,0,1,2,0,"));
+ assert.ok(text.includes("BITMAP 0,0,2,2,0,"));
  assert.ok(text.endsWith("PRINT 1,1\r\n"));
 });
 test("invalid bitmaps are rejected",()=>{
@@ -118,34 +118,37 @@ test("out-of-range error is recovered using an advertisement and retry",async()=
  }
 });
 
-
-test("original Arial layout keeps its previous 28px size for normal addresses",async()=>{
- const {layoutAddress}=await import("../public/munbyn-direct.js");
- const l=layoutAddress(["William Rivard","340 rue huard","Sorel-Tracy, QC J3P 6E1","Canada"],457,254);
- assert.equal(l.size,28);
- assert.ok(l.rows.join(" ").includes("J3P 6E1"));
-});
-test("long addresses must fit before a label is sent",async()=>{
- const {layoutAddress}=await import("../public/munbyn-direct.js");
- assert.throws(()=>layoutAddress(Array.from({length:20},()=> "Some lengthy address line"),457,254),/does not fit/);
-});
-
-test("bitmap encoder omits white rows and columns without dropping text pixels",async()=>{
- const {encodeTspl}=await import("../public/munbyn-direct.js");
- const width=58,height=90,bytes=new Uint8Array(width*height).fill(255);
- for(let y=10;y<15;y++)for(let x=5;x<11;x++)bytes[y*width+x]=0;
- for(let y=60;y<64;y++)for(let x=19;x<28;x++)bytes[y*width+x]=0;
- const command=encodeTspl({bytes,stride:width,height},2.25,1.25);
- const string=new TextDecoder("latin1").decode(command);
- assert.ok(string.includes("BITMAP 40,10,6,5,0,"));
- assert.ok(string.includes("BITMAP 152,60,9,4,0,"));
- assert.ok(string.endsWith("PRINT 1,1\r\n"));
- assert.ok(command.length<450,"should omit large blank bitmap regions");
-});
-test("blank bitmap still emits one valid label print command",async()=>{
- const {encodeTspl}=await import("../public/munbyn-direct.js");
- const output=encodeTspl({bytes:new Uint8Array(58*40).fill(255),stride:58,height:40},2.25,1.25);
- const str=new TextDecoder().decode(output);
+test("native TSPL contains full recipient address and no bulky bitmap",async()=>{
+ const {encodeTextLabel}=await import("../public/munbyn-direct.js");
+ const label=encodeTextLabel("Ship to",["Sample Buyer","PO Box 1256","Calgary, AB T2A 2B2","Canada"]);
+ const str=Array.from(label.bytes,x=>String.fromCharCode(x)).join("");
+ for(const row of ["Sample Buyer","PO Box 1256","Calgary, AB T2A 2B2","Canada"])assert.ok(str.includes(row));
+ assert.ok(str.includes("CODEPAGE 1252"));
  assert.ok(!str.includes("BITMAP"));
- assert.ok(str.includes("PRINT 1,1"));
+ assert.ok(label.bytes.length<1300);
+ assert.ok(str.endsWith("PRINT 1,1\r\n"));
+});
+test("address that cannot fit fails before sending",async()=>{
+ const {encodeTextLabel}=await import("../public/munbyn-direct.js");
+ assert.throws(()=>encodeTextLabel("Ship to",Array.from({length:11},(_,i)=>"Line "+i)),/does not fit/);
+});
+test("native printer text preserves accented names in code page 1252",async()=>{
+ const {encodeTextLabel}=await import("../public/munbyn-direct.js");
+ const label=encodeTextLabel("Ship to",["Élodie","Montréal QC","Canada"]);
+ assert.ok(label.bytes.includes(201));assert.ok(label.bytes.includes(233));
+});
+
+test("one order gives two complete native TSPL jobs, sender then recipient",async()=>{
+ const {commandsForOrder}=await import("../public/munbyn-direct.js");
+ const settings={labelWidth:2.25,labelHeight:1.25,returnName:"William Rivard",
+  returnAddress:{line1:"340 rue huard",cityStatePostal:"Sorel-Tracy QC J3P 6E1",country:"Canada"}};
+ const order={shipTo:{name:"Justin Ritchie",line1:"PO Box 1256",cityStatePostal:"Indian Head SK S0G 2K0",country:"Canada"}};
+ const jobs=commandsForOrder(order,settings);
+ assert.equal(jobs.length,2);
+ const decode=job=>Array.from(job.bytes,x=>String.fromCharCode(x)).join("");
+ const from=decode(jobs[0]),to=decode(jobs[1]);
+ for(const line of ["William Rivard","340 rue huard","J3P 6E1"])assert.ok(from.includes(line),line);
+ for(const line of ["Justin Ritchie","PO Box 1256","Indian Head SK S0G 2K0"])assert.ok(to.includes(line),line);
+ assert.ok(from.endsWith("PRINT 1,1\r\n")&&to.endsWith("PRINT 1,1\r\n"));
+ assert.ok(jobs.every(j=>j.bytes.length<1200));
 });
