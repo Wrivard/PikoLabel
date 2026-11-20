@@ -24,10 +24,12 @@ test("42 different card listings fit on one Letter page with no omissions",()=>{
  const content=pdf.toString("latin1");
  assert.match(content,/\/MediaBox \[0 0 612\.00 792\.00\]/);
  assert.match(content,/\/Count 1/);
- for(const i of [1,12,24,35,42]){
-   const title=o.items[i-1].title;
-   assert.ok(content.includes(Buffer.from(title,"latin1").toString("hex").toUpperCase()),"missing "+title);
+ const rendered=layout.laid.flat();
+ for(let i=0;i<42;i++){
+   const expected=o.items[i].title;
+   assert.equal(rendered[i].rows.join(" "),expected,"missing or truncated item "+(i+1));
  }
+ assert.ok(content.includes(Buffer.from("Pokemon Card 01","latin1").toString("hex").toUpperCase()));
 });
 test("one page is generated per eBay order, not per card",()=>{
  const p=packingPdf([order(42),order(2)],settings).toString("latin1");
