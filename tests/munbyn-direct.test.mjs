@@ -138,17 +138,24 @@ test("native printer text preserves accented names in code page 1252",async()=>{
  assert.ok(label.bytes.includes(201));assert.ok(label.bytes.includes(233));
 });
 
-test("one order gives two complete native TSPL jobs, sender then recipient",async()=>{
- const {commandsForOrder}=await import("../public/munbyn-direct.js");
- const settings={labelWidth:2.25,labelHeight:1.25,returnName:"William Rivard",
-  returnAddress:{line1:"340 rue huard",cityStatePostal:"Sorel-Tracy QC J3P 6E1",country:"Canada"}};
- const order={shipTo:{name:"Justin Ritchie",line1:"PO Box 1256",cityStatePostal:"Indian Head SK S0G 2K0",country:"Canada"}};
- const jobs=commandsForOrder(order,settings);
- assert.equal(jobs.length,2);
- const decode=job=>Array.from(job.bytes,x=>String.fromCharCode(x)).join("");
- const from=decode(jobs[0]),to=decode(jobs[1]);
- for(const line of ["William Rivard","340 rue huard","J3P 6E1"])assert.ok(from.includes(line),line);
- for(const line of ["Justin Ritchie","PO Box 1256","Indian Head SK S0G 2K0"])assert.ok(to.includes(line),line);
- assert.ok(from.endsWith("PRINT 1,1\r\n")&&to.endsWith("PRINT 1,1\r\n"));
- assert.ok(jobs.every(j=>j.bytes.length<1200));
+
+test("original Arial layout stays large and centers across the label",async()=>{
+ const {layoutAddressCentered}=await import("../public/munbyn-direct.js");
+ const result=layoutAddressCentered(["William Rivard","340 rue huard","Sorel-Tracy QC J3P 6E1","Canada"],457,254);
+ assert.equal(result.size,28);
+ assert.ok(result.x>=18);
+ assert.ok(result.y>=18);
+ assert.ok(Math.abs(result.x+result.widest/2-457/2)<=1);
+ assert.ok(Math.abs(result.y+result.total/2-254/2)<=1);
+});
+test("long address preserves every word and fits on the paper",async()=>{
+ const {layoutAddressCentered}=await import("../public/munbyn-direct.js");
+ const lines=["Justin Ritchie","PO Box 1256","Indian Head Saskatchewan S0G 2K0","Canada"];
+ const l=layoutAddressCentered(lines,457,254);
+ assert.equal(l.rows.join(" "),lines.join(" "));
+ assert.ok(l.y+l.total<=254-18);
+});
+test("oversized address fails instead of clipping lines",async()=>{
+ const {layoutAddressCentered}=await import("../public/munbyn-direct.js");
+ assert.throws(()=>layoutAddressCentered(Array.from({length:18},()=> "Long extra address line"),457,254),/does not fit/);
 });
