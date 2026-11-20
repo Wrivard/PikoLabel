@@ -9,11 +9,11 @@ test("bitmap uses TSPL white=1 and black=0, padded white",()=>{
  assert.deepEqual([...bitmap.bytes],[0x7f,0xff]);
 });
 test("TSPL stream has exact physical size, bitmap payload, and one print",()=>{
- const bitmap={bytes:new Uint8Array(4).fill(255),stride:2,height:2};
+ const bitmap={bytes:new Uint8Array([0,255,0,255]),stride:2,height:2};
  const command=encodeTspl(bitmap,2.25,1.25);
  const text=new TextDecoder().decode(command);
  assert.ok(text.includes("SIZE 57.15 mm,31.75 mm"));
- assert.ok(text.includes("BITMAP 0,0,2,2,0,"));
+ assert.ok(text.includes("BITMAP 0,0,1,2,0,"));
  assert.ok(text.endsWith("PRINT 1,1\r\n"));
 });
 test("invalid bitmaps are rejected",()=>{
