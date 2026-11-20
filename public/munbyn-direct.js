@@ -250,7 +250,7 @@ export function pagesForOrder(order,settings){
  return [rasterLabel("Ship from",from,w,h),rasterLabel("Ship to",to,w,h)];
 }
 export function testPage(settings){
- return rasterLabel("PIKO TEST",["Arial font test","Large centered text","Print alignment"],Number(settings.labelWidth)||2.25,Number(settings.labelHeight)||1.25);
+ return encodeReliableLabel("PIKO TEST",["Bluetooth test","Clear native font","Centered text"],Number(settings.labelWidth)||2.25,Number(settings.labelHeight)||1.25);
 }
 
 export class BluetoothWriteTimeout extends Error {

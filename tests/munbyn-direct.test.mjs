@@ -153,3 +153,24 @@ test("successful write does not trigger timeout",async()=>{
  await writeChunkWithTimeout({async writeValueWithResponse(){}},new Uint8Array([1]),{timeoutMs:100,onTimeout(){reset=true}});
  assert.equal(reset,false);
 });
+
+test("lightweight centered TSPL label contains the whole address",async()=>{
+ const {encodeReliableLabel}=await import("../public/munbyn-direct.js");
+ const label=encodeReliableLabel("Ship from",["William Rivard","340 rue huard","Sorel-Tracy QC J3P 6E1","Canada"]);
+ const str=Array.from(label.bytes,b=>String.fromCharCode(b)).join("");
+ for(const item of ["Ship from","William Rivard","340 rue huard","Sorel-Tracy QC J3P 6E1","Canada"])assert.ok(str.includes(item),item);
+ assert.ok(label.left>=18&&label.top>=18);
+ assert.ok(label.bytes.length<1000);
+ assert.ok(str.endsWith("PRINT 1,1\r\n"));
+});
+test("both labels are generated as lightweight independent jobs",async()=>{
+ const {reliablePagesForOrder}=await import("../public/munbyn-direct.js");
+ const order={shipTo:{name:"Justin Ritchie",line1:"PO Box 1256",cityStatePostal:"Indian Head SK S0G 2K0",country:"Canada"}};
+ const settings={labelWidth:2.25,labelHeight:1.25,returnName:"William Rivard",returnAddress:{line1:"340 rue huard",cityStatePostal:"Sorel-Tracy QC J3P 6E1",country:"Canada"}};
+ const pages=reliablePagesForOrder(order,settings);
+ assert.equal(pages.length,2);
+ for(const page of pages)assert.ok(page.bytes.length<1000);
+ const recipient=Array.from(pages[1].bytes,b=>String.fromCharCode(b)).join("");
+ assert.ok(recipient.includes("Justin Ritchie"));
+ assert.ok(recipient.includes("PO Box 1256"));
+});
