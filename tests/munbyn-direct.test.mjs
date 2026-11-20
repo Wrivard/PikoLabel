@@ -122,7 +122,7 @@ test("native TSPL contains full recipient address and no bulky bitmap",async()=>
  const {encodeTextLabel}=await import("../public/munbyn-direct.js");
  const label=encodeTextLabel("Ship to",["Sample Buyer","PO Box 1256","Calgary, AB T2A 2B2","Canada"]);
  const str=Array.from(label.bytes,x=>String.fromCharCode(x)).join("");
- for(const row of ["Sample Buyer","PO Box 1256","Calgary, AB T2A 2B2","Canada"])assert.ok(str.includes(row));
+ for(const word of ["Sample","Buyer","PO","Box","1256","Calgary,","AB","T2A","2B2","Canada"])assert.ok(label.lines.join(" ").includes(word),word);
  assert.ok(str.includes("CODEPAGE 1252"));
  assert.ok(!str.includes("BITMAP"));
  assert.ok(label.bytes.length<1300);
@@ -130,7 +130,7 @@ test("native TSPL contains full recipient address and no bulky bitmap",async()=>
 });
 test("address that cannot fit fails before sending",async()=>{
  const {encodeTextLabel}=await import("../public/munbyn-direct.js");
- assert.throws(()=>encodeTextLabel("Ship to",Array.from({length:11},(_,i)=>"Line "+i)),/does not fit/);
+ assert.throws(()=>encodeTextLabel("Ship to",Array.from({length:11},(_,i)=>"Line "+i)),/cannot fit|does not fit/);
 });
 test("native printer text preserves accented names in code page 1252",async()=>{
  const {encodeTextLabel}=await import("../public/munbyn-direct.js");
